@@ -65,11 +65,13 @@ private:
         float color2[4];
         float uv[4];
         float params[4];
-        float clip[4];
-        float clip2[4];
+        float clip[4];     // plain clip: intersection of every pushed rect
+        float rclip[4];    // innermost rounded clip rect
+        float clip2[4];    // rounded clip radius, group opacity (backdrops), -, -
     };
     struct Clip {
-        float l, t, r, b, radius;  // pixels
+        float l, t, r, b;               // pixels, intersection of all clips
+        float rl, rt, rr, rb, radius;   // innermost rounded clip
     };
     enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc };
 

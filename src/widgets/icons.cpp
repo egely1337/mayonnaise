@@ -180,10 +180,11 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.line(13.4f, 8.5f, 13.4f, 9);
             break;
         case Icon::Paintbrush:
-            pen.line(16, 3.5f, 9, 11);
-            pen.line(15, 2.6f, 16.9f, 4.5f);
-            pen.arc(7, 13.5f, 3, 90, 200);
-            pen.poly({{4, 14}, {3.5f, 17}, {7, 16.5f}});
+            // Handle, ferrule, and a filled bristle tip sweeping to a point.
+            pen.line(16.5f, 3.5f, 10.8f, 9.2f);
+            pen.p.drawLine(pen.at(10.8f, 9.2f), pen.at(9.4f, 10.6f), color, pen.w * 2.2f);
+            pen.dot(7.4f, 12.6f, 2.6f);
+            pen.p.drawLine(pen.at(6.2f, 14.2f), pen.at(3.4f, 16.8f), color, pen.w * 1.6f);
             break;
         case Icon::Display:
             pen.rrect(2.5f, 3.5f, 15, 10, 1.8f);

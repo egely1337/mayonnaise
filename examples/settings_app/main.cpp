@@ -40,9 +40,8 @@ Element accentPicker(App& app) {
         }
     });
     canvas.frame(kAccents.size() * (kDot + kGap) - kGap, 22);
-    canvas.onClick([&app, node = canvas.node()](Point pt) {
-        float x = pt.x - node->frame().x;
-        auto i = static_cast<size_t>(x / (kDot + kGap));
+    canvas.onClick([&app](Point pt) {
+        auto i = static_cast<size_t>(pt.x / (kDot + kGap));
         if (i < kAccents.size()) app.setAccentColor(kAccents[i].color);
     });
     return canvas;

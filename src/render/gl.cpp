@@ -42,13 +42,20 @@ GLuint compile(GLenum stage, std::string_view source, std::string_view name) {
 bool load() {
     int version = gladLoadGL(reinterpret_cast<GLADloadfunc>(&platform::Platform::glProcAddress));
     if (!version) return false;
+    bool debugOutput = false;
 #ifndef NDEBUG
     if (GLAD_GL_KHR_debug) {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         glDebugMessageCallback(debugCallback, nullptr);
+        debugOutput = true;
     }
 #endif
+    if (const char* v = std::getenv("MAYO_VERBOSE"); v && *v && *v != '0') {
+        std::fprintf(stderr, "mayonnaise: GL %s on %s (KHR_debug output %s)\n",
+                     reinterpret_cast<const char*>(glGetString(GL_VERSION)),
+                     reinterpret_cast<const char*>(glGetString(GL_RENDERER)), debugOutput ? "on" : "off");
+    }
     return true;
 }
 

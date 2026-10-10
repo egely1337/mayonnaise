@@ -289,10 +289,13 @@ void Window::Impl::render() {
     Painter painter(r, *app.impl().text);
 
     static const std::string testScene = std::getenv("MAYO_TEST_SCENE") ? std::getenv("MAYO_TEST_SCENE") : "";
-    if (testScene == "text") {
-        drawTextTestScene(painter, size, theme);
-    } else if (!testScene.empty()) {
-        drawRendererTestScene(r, size, theme);
+    if (!testScene.empty()) {
+        painter.pushClip({0, 0, size.width, size.height}, root->windowRadius());
+        if (testScene == "text")
+            drawTextTestScene(painter, size, theme);
+        else
+            drawRendererTestScene(r, size, theme);
+        painter.popClip();
     } else {
         root->paint(painter);
         for (auto& overlay : dispatcher.overlays()) overlay->paint(painter);

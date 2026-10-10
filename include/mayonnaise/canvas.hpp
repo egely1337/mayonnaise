@@ -10,6 +10,7 @@ namespace mayo {
 class CanvasView : public Widget {
 public:
     using DrawFn = std::function<void(Painter&, const Rect&)>;
+    /// Receives the pointer position relative to the canvas' content rect (0,0 = top-left).
     using PointFn = std::function<void(Point)>;
 
     explicit CanvasView(DrawFn draw) : m_draw(std::move(draw)) {}
@@ -29,18 +30,19 @@ public:
     [[nodiscard]] bool isInteractive() const override { return m_onClick || m_onDrag; }
     bool onPointerDown(const PointerEvent& e) override {
         if (!m_onClick && !m_onDrag) return false;
-        if (m_onDrag) m_onDrag(e.position);
+        if (m_onDrag) m_onDrag(local(e.position));
         return true;
     }
     void onPointerMove(const PointerEvent& e) override {
-        if (isPressed() && m_onDrag) m_onDrag(e.position);
-        if (m_onHover) m_onHover(e.position);
+        if (isPressed() && m_onDrag) m_onDrag(local(e.position));
+        if (m_onHover) m_onHover(local(e.position));
     }
     void onPointerUp(const PointerEvent& e) override {
-        if (m_onClick && frame().contains(e.position)) m_onClick(e.position);
+        if (m_onClick && frame().contains(e.position)) m_onClick(local(e.position));
     }
 
 private:
+    [[nodiscard]] Point local(Point window) const { return window - contentRect().origin(); }
     DrawFn m_draw;
     PointFn m_onClick;
     PointFn m_onDrag;
@@ -50,7 +52,7 @@ private:
 /// Custom drawing without subclassing. Coordinates are window points; `bounds` is the content rect.
 ///     mayo::Canvas([](mayo::Painter& p, mayo::Rect bounds) { p.fillCircle(bounds.center(), 20, ...); })
 ///         .frame(120, 80);
-/// Call invalidate() (via `->invalidate()`) to redraw after changing captured state.
+/// Pointer callbacks get positions relative to the canvas. Call redraw() after changing captured state.
 class Canvas : public WidgetHandle<Canvas, CanvasView> {
 public:
     explicit Canvas(CanvasView::DrawFn draw) : WidgetHandle(std::make_shared<CanvasView>(std::move(draw))) {}

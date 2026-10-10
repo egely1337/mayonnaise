@@ -18,8 +18,9 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 # debug build (enables KHR_debug GL output)
 cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug && cmake --build build-debug -j
 
-# ASan + UBSan build
+# ASan + UBSan build (the suppression file hides GL-driver leaks, see Gotchas)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DMAYONNAISE_SANITIZE=ON && cmake --build build-asan -j
+LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./build-asan/examples/gallery/gallery
 
 # run examples
 ./build/examples/hello/hello
@@ -35,11 +36,13 @@ MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery
 
 Useful environment variables:
 - `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
-- `MAYO_DEMO=picker|menu|popover` (gallery only) — open a popup at startup for screenshots.
+- `MAYO_DEMO=picker|menu|popover` (gallery) / `MAYO_DEMO=scroll` (settings_app) — open a popup or scroll at
+  startup for screenshots.
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
 - `MAYO_SCALE=<float>` — override the UI scale factor (HiDPI testing).
 - `MAYO_NO_TRANSPARENCY=1` — opaque, square-cornered windows (X11 without compositor).
+- `MAYO_VERBOSE=1` — print GL version/renderer and whether KHR_debug output is on.
 - `SDL_VIDEO_DRIVER=x11|wayland` — force SDL backend.
 
 CMake options: `MAYONNAISE_BUILD_EXAMPLES` (ON), `MAYONNAISE_BUILD_TESTS` (ON),
@@ -115,9 +118,21 @@ framebuffer → swap. If any animation is still running, another frame is schedu
 - [x] M6 Window chrome — borderless transparent window, traffic lights, hit-test drag/resize, unified Toolbar
 - [x] M7 Materials — glass Sidebar in SplitView, Menu / Picker / Popover, Form cards, Canvas, App::after timers
 - [x] M8 TextField (+Search, secure), SegmentedControl, ProgressBar (+indeterminate, spinner), ScrollView (glide, momentum, rubber band, overlay bars)
-- [ ] M9 Polish
+- [x] M9 Polish — HiDPI verified (MAYO_SCALE=2), accent colours, gallery + settings_app, README + screenshots,
+      Clang/GCC warning-free, ASan/UBSan clean, KHR_debug clean on Wayland + X11, idle CPU ~0, install() verified
 
-Next: M9.
+Verified on: Arch-based (CachyOS) with GCC 16 / Clang 22, Mesa radeonsi, Wayland + XWayland. Not yet verified
+on a stock Ubuntu 24.04 / Fedora 40 machine (README lists the packages; the FetchContent path for SDL3,
+FreeType and doctest was verified here with `-DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DCMAKE_DISABLE_FIND_PACKAGE_Freetype=ON`).
+
+Known issues / next steps:
+- No kerning or shaping (HarfBuzz; system HarfBuzz is common, make it optional).
+- Interactive behaviours (drag/resize via hit test, real touchpad momentum feel, IME) were only smoke-tested
+  by hand-free runs; unit tests cover the physics and editing logic, not the feel.
+- No client-side window shadow (would need an input-shape margin; SDL can't express it).
+- Popups have a fade-in but no fade-out (they're removed immediately on dismiss).
+- Menus open below their button; macOS pop-up buttons overlay the selected row on the button.
+- Single-line TextField only; no multi-line text editor.
 
 ## Decisions
 
@@ -136,7 +151,37 @@ Next: M9.
 - **Default stack alignment is leading/top** (not SwiftUI's center) because forms and lists are the common case;
   `.align(Alignment::Center)` centers both axes.
 - **Premultiplied alpha everywhere** in the renderer (needed for a correct alpha channel on a transparent window).
+- **Root content fills the window.** The window always arranges its content at the full content rect, so a root
+  stack's `.align()` positions its children in the window and a root `.background()` covers the window.
+- **Two clips per primitive**: the plain intersection of every pushed rect plus the innermost rounded rect.
+  Cheap (no stencil, no batch breaks) and correct for the UI case of rect clips nested in rounded panels.
+- **Overlays (menus, popovers) are measured at their ideal size** (`{inf, inf}`), then clamped to the window, so
+  expanding content (spacers) doesn't stretch them to full width.
+- **Extra components beyond the brief**: `Form`/`FormSection`/`FormRow` (System Settings cards), `Picker`,
+  `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
 ## Gotchas
 
-(Keep adding things learned the hard way.)
+- **Measure overlays with infinite space.** Proposing the window size made a popover containing a `Spacer`
+  as wide as the window.
+- **Nested clips must not inherit the outer radius onto the inner rect** — it rounded the corners of a text
+  clip and ate the first glyph ("Lock" rendered as "' ock"). That's why there are two clip rects per primitive.
+- **`theme()` works without an App** (falls back to the default light theme) so layout tests can run headless.
+- **WidgetHost::time() is the wall clock outside frames.** Animations started from input handlers after an
+  idle period would otherwise start "in the past" (the last frame time) and finish instantly.
+- **Screenshot mode needs a time floor** (`MAYO_SCREENSHOT_DELAY`): without vsync throttling (hidden/occluded
+  windows) N frames can finish before `App::after` timers fire.
+- **Backdrop materials ignore the colour opacity stack by construction** (they output the blurred scene), so
+  group opacity is passed separately (`clip2.y`) — otherwise fading popovers pop in at full opacity.
+- **Wheel vs touchpad**: SDL3 gives no device type; fractional deltas are treated as touchpad (1:1 + momentum),
+  whole notches as a wheel (animated glide). Touchpad gesture end = no events for 70 ms.
+- **LeakSanitizer** reports ~311 bytes in `<unknown module>` frames: Mesa allocations in driver modules that
+  `SDL_Quit` unloads, reproducible with a bare SDL3 + GL program. Run examples with
+  `LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp`.
+- **Canvas callbacks get local coordinates.** Capturing the canvas' own handle in its callback to read its frame
+  creates a shared_ptr cycle (a real leak ASan caught in settings_app).
+- **Static installs must export the glad library** (`mayonnaise_glad`); wrapping it in `$<BUILD_INTERFACE:>`
+  produced undefined `glad_gl*` symbols in installed consumers.
+- **SDL hit-test DRAGGABLE regions never deliver the button press to the app** (the compositor takes over), so
+  title-bar double-click-to-zoom isn't available; traffic lights and toolbar controls must report
+  `isInteractive()` to stay clickable.

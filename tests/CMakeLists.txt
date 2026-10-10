@@ -2,5 +2,11 @@ add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp te
 target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest)
 target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 mayonnaise_set_warnings(mayonnaise_tests)
+# doctest's registration macros use __COUNTER__, which recent Clang flags under -Wpedantic.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-Wno-c2y-extensions MAYONNAISE_HAS_WNO_C2Y)
+if(MAYONNAISE_HAS_WNO_C2Y)
+  target_compile_options(mayonnaise_tests PRIVATE -Wno-c2y-extensions)
+endif()
 mayonnaise_set_sanitizers(mayonnaise_tests)
 add_test(NAME mayonnaise_tests COMMAND mayonnaise_tests)

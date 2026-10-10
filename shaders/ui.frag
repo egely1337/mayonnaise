@@ -11,6 +11,7 @@ flat in vec4 v_color2;
 flat in vec4 v_gradient;
 flat in vec4 v_params;
 flat in vec4 v_clip;
+flat in vec4 v_rclip;
 flat in vec4 v_clip2;
 
 uniform sampler2D u_texture;
@@ -143,12 +144,15 @@ void main() {
         alpha = coverage(d);
     }
 
-    // Clip: rounded rectangle in pixels.
+    // Clips (pixels): the plain intersection rect, then the innermost rounded rect.
     vec2 clipCenter = (v_clip.xy + v_clip.zw) * 0.5;
     vec2 clipHalf = (v_clip.zw - v_clip.xy) * 0.5;
-    float cr = v_clip2.x;
-    float clipD = sdRoundBox(v_pixel - clipCenter, clipHalf, vec4(cr));
-    alpha *= coverage(clipD);
+    alpha *= coverage(sdRoundBox(v_pixel - clipCenter, clipHalf, vec4(0.0)));
+    if (v_clip2.x > 0.0) {
+        vec2 rc = (v_rclip.xy + v_rclip.zw) * 0.5;
+        vec2 rh = (v_rclip.zw - v_rclip.xy) * 0.5;
+        alpha *= coverage(sdRoundBox(v_pixel - rc, rh, vec4(v_clip2.x)));
+    }
 
     o_color = color * alpha;
 }

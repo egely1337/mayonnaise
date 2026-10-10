@@ -46,7 +46,7 @@ target_include_directories(mayonnaise
 # SDL/GL/FreeType are implementation details: public headers never include them.
 target_link_libraries(mayonnaise
   PRIVATE
-    $<BUILD_INTERFACE:mayonnaise_glad>
+    mayonnaise_glad  # static: must be exported so installed consumers link it
     $<BUILD_INTERFACE:mayonnaise_stb>
     SDL3::SDL3
     Freetype::Freetype

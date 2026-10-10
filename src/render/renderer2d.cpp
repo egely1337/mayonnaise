@@ -25,7 +25,7 @@ Renderer2D::Renderer2D() {
     m_instanceBuffer = gl::makeBuffer();
     glBindVertexArray(m_vao.id());
     glBindBuffer(GL_ARRAY_BUFFER, m_instanceBuffer.id());
-    for (GLuint i = 0; i < 9; ++i) {
+    for (GLuint i = 0; i < 10; ++i) {
         glEnableVertexAttribArray(i);
         glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(Instance),
                               reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i * 4 * sizeof(float))));
@@ -52,7 +52,7 @@ void Renderer2D::beginFrame(int pixelWidth, int pixelHeight, float scale) {
     m_scale = scale;
     m_scene.ensure(m_width, m_height);
     m_clips.clear();
-    m_clips.push_back({-kNoClip, -kNoClip, kNoClip, kNoClip, 0});
+    m_clips.push_back({-kNoClip, -kNoClip, kNoClip, kNoClip, -kNoClip, -kNoClip, kNoClip, kNoClip, 0});
     m_opacity.assign(1, 1.0f);
     m_instances.clear();
     m_batchTexture = 0;
@@ -133,6 +133,10 @@ Renderer2D::Instance& Renderer2D::push(Type type, float l, float t, float r, flo
     in.clip[1] = c.t;
     in.clip[2] = c.r;
     in.clip[3] = c.b;
+    in.rclip[0] = c.rl;
+    in.rclip[1] = c.rt;
+    in.rclip[2] = c.rr;
+    in.rclip[3] = c.rb;
     in.clip2[0] = c.radius;
     in.clip2[1] = in.clip2[2] = in.clip2[3] = 0;
     return in;
@@ -322,14 +326,24 @@ void Renderer2D::backdrop(const Rect& rect, const CornerRadii& radii, const Mate
 void Renderer2D::pushClip(const Rect& rect, float radius) {
     const float s = m_scale;
     const Clip& cur = m_clips.back();
-    Clip c{std::max(cur.l, std::round(rect.left() * s)), std::max(cur.t, std::round(rect.top() * s)),
-           std::min(cur.r, std::round(rect.right() * s)), std::min(cur.b, std::round(rect.bottom() * s)),
-           radius * s};
-    // A nested rounded clip keeps the inner radius; corners of an outer rounded clip are lost,
-    // which is fine for UI where clips nest inside each other's straight edges.
-    if (radius <= 0 && cur.radius > 0) c.radius = cur.radius;
-    if (c.r < c.l) c.r = c.l;
-    if (c.b < c.t) c.b = c.t;
+    const float l = std::round(rect.left() * s);
+    const float t = std::round(rect.top() * s);
+    const float r = std::round(rect.right() * s);
+    const float b = std::round(rect.bottom() * s);
+    Clip c = cur;
+    c.l = std::max(cur.l, l);
+    c.t = std::max(cur.t, t);
+    c.r = std::max(c.l, std::min(cur.r, r));
+    c.b = std::max(c.t, std::min(cur.b, b));
+    // The shader evaluates one rounded clip plus the plain intersection. A nested rounded clip
+    // replaces the outer one; nested rectangular clips keep it, so corners stay rounded.
+    if (radius > 0) {
+        c.rl = l;
+        c.rt = t;
+        c.rr = r;
+        c.rb = b;
+        c.radius = radius * s;
+    }
     m_clips.push_back(c);
 }
 

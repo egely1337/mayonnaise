@@ -1,0 +1,3 @@
+# GL driver (Mesa) allocations that live in modules dlclose()d by SDL_Quit; reproducible
+# with a bare SDL3 + GL program, so not ours. LSan cannot symbolize unloaded modules.
+leak:<unknown module>

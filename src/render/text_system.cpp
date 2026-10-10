@@ -74,10 +74,10 @@ bool TextSystem::allocate(int w, int h, int& x, int& y) {
 
 const TextSystem::Entry& TextSystem::glyph(char32_t cp, const Font& font, float pixelSize, int subpixel,
                                            Renderer2D& renderer) {
-    std::uint64_t key = (static_cast<std::uint64_t>(cp) << 40) |
-                        (static_cast<std::uint64_t>(std::lround(pixelSize * 4.0f)) << 24) |
-                        (static_cast<std::uint64_t>(std::lround(std::clamp(font.size, 14.0f, 32.0f))) << 16) |
-                        (static_cast<std::uint64_t>(font.weight) << 4) | static_cast<std::uint64_t>(subpixel);
+    const Key key{(static_cast<std::uint64_t>(cp) << 32) | static_cast<std::uint64_t>(std::lround(pixelSize * 4.0f)),
+                  (static_cast<std::uint64_t>(font.family) << 32) | (static_cast<std::uint64_t>(font.italic) << 24) |
+                      (static_cast<std::uint64_t>(std::lround(std::clamp(font.size, 14.0f, 32.0f))) << 16) |
+                      (static_cast<std::uint64_t>(font.weight) << 4) | static_cast<std::uint64_t>(subpixel)};
     auto it = m_entries.find(key);
     if (it != m_entries.end()) return it->second;
 

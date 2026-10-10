@@ -166,22 +166,24 @@ void EventDispatcher::magnify(const MagnifyEvent& e) {
     }
 }
 
-void EventDispatcher::keyDown(const KeyEvent& e) {
+bool EventDispatcher::keyDown(const KeyEvent& e) {
     auto f = lock(focused());
     Widget* start = f ? f.get() : (!m_overlays.empty() ? m_overlays.back().get() : m_root.get());
     for (Widget* w = start; w; w = w->parent()) {
-        if (w->isEnabled() && w->onKeyDown(e)) return;
+        if (w->isEnabled() && w->onKeyDown(e)) return true;
     }
     if (e.key == Key::Tab && !e.primary() && !e.alt()) {
         focusNext(e.shift());
-        return;
+        return true;
     }
-    if (m_overlays.empty() && onUnhandledKey && onUnhandledKey(e)) return;
+    if (m_overlays.empty() && onUnhandledKey && onUnhandledKey(e)) return true;
     if (e.key == Key::Escape && !m_overlays.empty()) {
         auto top = m_overlays.back();
         if (onOverlayDismissed) onOverlayDismissed(top.get());
         removeOverlay(top.get());
+        return true;
     }
+    return false;
 }
 
 void EventDispatcher::textInput(const TextInputEvent& e) {

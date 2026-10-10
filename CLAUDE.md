@@ -30,6 +30,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/video_player/video_player <media files...>   # only built when FFmpeg dev libs exist
 ./build/examples/task_manager/task_manager                    # Linux only
 ./build/examples/finder/finder [folder]                         # Linux only
+./build/examples/terminal/terminal [directory]                  # Linux only
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -168,6 +169,16 @@ Known issues / next steps:
   Cheap (no stencil, no batch breaks) and correct for the UI case of rect clips nested in rounded panels.
 - **Overlays (menus, popovers) are measured at their ideal size** (`{inf, inf}`), then clamped to the window, so
   expanding content (spacers) doesn't stretch them to full width.
+- **Fonts beyond Inter** (`<mayonnaise/font.hpp>`): `Font::family` (0 = Inter) and `Font::italic`;
+  `systemFontFamily("monospace")` resolves installed files through a dlopen()ed libfontconfig (no build
+  dependency). Missing bold/italic faces are synthesized (outline embolden / shear). A character no
+  registered family has triggers a fontconfig `charset=` lookup once and the found font joins the fallbacks,
+  so CJK, symbols and Nerd Font icons render anywhere (Finder file names too). Inter's tracking applies only
+  to Inter glyphs.
+- **Terminal example**: `Screen` (examples/terminal/screen.cpp) is a UI-free xterm emulator tested by
+  tests/test_terminal_screen.cpp; `Pty` reads on a worker thread with back-pressure (4 MB) and never blocks
+  the UI on writes; `TerminalView` snaps cells to whole device pixels and draws box drawing, blocks, braille
+  and powerline glyphs as geometry so they join between cells.
 - **Settings** (`mayo::Settings`, `App::settings()`): one `key = value` file per app in
   `~/.config/mayonnaise/<app>/settings.conf`, written atomically 0.5 s after the last change and on exit.
   The App stores `appearance` (system/light/dark), `accent` (system or #RRGGBB) and `window.<name>.*` for
@@ -208,6 +219,12 @@ Known issues / next steps:
 - **Screenshot runs never write settings** (read-only `Settings`), but they do read them: use `XDG_CONFIG_HOME`
   for reproducible shots. Live system-theme switching was implemented against SDL's event but not exercised
   by an automated run (it would flip the desktop's theme).
+- **Ctrl+W only closes a window when nothing handled it** (`EventDispatcher::keyDown` returns whether the key
+  was used): in a terminal it deletes a word. `Window::onCloseRequested` can veto user-initiated closes.
+- **Alt vs AltGr**: SDL reports both as Alt. The terminal defers Alt+key to the next loop iteration and lets
+  a following text-input event win when it is a different character (AltGr+Q = @ on Turkish keyboards).
+- **Bracketed paste swallows newlines**: shells don't execute a pasted "\n", so demo commands are pasted and
+  then a "\r" is typed.
 - **Designated initializers and WindowOptions**: new fields need a default member initializer (`{}`), or GCC's
   `-Wmissing-field-initializers` fires in every example using `{.title = ...}`.
 - **Windows popped up by screenshot runs take keyboard focus**, so typing elsewhere during a run lands in the

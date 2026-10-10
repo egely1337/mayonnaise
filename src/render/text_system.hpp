@@ -37,7 +37,15 @@ private:
     int m_shelfX = 0;
     int m_shelfY = 0;
     int m_shelfHeight = 0;
-    std::unordered_map<std::uint64_t, Entry> m_entries;
+    struct Key {
+        std::uint64_t a;  // code point, pixel size
+        std::uint64_t b;  // style, subpixel
+        bool operator==(const Key&) const = default;
+    };
+    struct KeyHash {
+        size_t operator()(const Key& k) const { return std::hash<std::uint64_t>{}(k.a * 0x9E3779B97F4A7C15ull ^ k.b); }
+    };
+    std::unordered_map<Key, Entry, KeyHash> m_entries;
     GlyphBitmap m_scratch;
 };
 

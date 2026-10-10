@@ -9,6 +9,7 @@
 #include "color.hpp"
 #include "control.hpp"
 #include "events.hpp"
+#include "font.hpp"
 #include "geometry.hpp"
 #include "icon.hpp"
 #include "layout.hpp"

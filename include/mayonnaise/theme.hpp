@@ -22,13 +22,21 @@ enum class FontWeight : std::uint16_t {
     Bold = 700,
 };
 
+/// Font family id: 0 is the built-in Inter; others come from registerFontFamily() / systemFontFamily()
+/// (<mayonnaise/font.hpp>).
+using FontFamily = std::uint16_t;
+
 struct Font {
     float size = 13;                       ///< points
     FontWeight weight = FontWeight::Regular;
     float lineHeight = 16;                 ///< points, baseline to baseline
+    FontFamily family = 0;
+    bool italic = false;                   ///< synthesized (slanted) when the family has no italic face
 
-    [[nodiscard]] Font withWeight(FontWeight w) const { return {size, w, lineHeight}; }
-    [[nodiscard]] Font withSize(float s) const { return {s, weight, lineHeight * s / size}; }
+    [[nodiscard]] Font withWeight(FontWeight w) const { return {size, w, lineHeight, family, italic}; }
+    [[nodiscard]] Font withSize(float s) const { return {s, weight, lineHeight * s / size, family, italic}; }
+    [[nodiscard]] Font withFamily(FontFamily f) const { return {size, weight, lineHeight, f, italic}; }
+    [[nodiscard]] Font withItalic(bool i = true) const { return {size, weight, lineHeight, family, i}; }
     constexpr bool operator==(const Font&) const = default;
 };
 

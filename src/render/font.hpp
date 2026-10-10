@@ -5,9 +5,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
+#include "mayonnaise/font.hpp"
 #include "mayonnaise/theme.hpp"
 
 namespace mayo::render {
@@ -17,6 +19,7 @@ struct FontMetrics {
     float descender = 0;  // points, positive (below baseline)
     float capHeight = 0;
     float xHeight = 0;
+    float lineGap = 0;
 };
 
 struct GlyphBitmap {
@@ -34,6 +37,8 @@ public:
     FontLibrary(const FontLibrary&) = delete;
     FontLibrary& operator=(const FontLibrary&) = delete;
 
+    std::optional<FontFamily> registerFamily(const FontFamilyFiles& files);
+    void addFallback(FontFamily family);
     /// Horizontal advance of `cp` in points, including Inter's size-dependent tracking.
     float advance(char32_t cp, const Font& font);
     FontMetrics metrics(const Font& font);

@@ -14,6 +14,7 @@ add_library(mayonnaise
   platform/sdl_platform.cpp
   render/gl.cpp
   render/font.cpp
+  render/font_api.cpp
   render/image_io.cpp
   render/painter.cpp
   render/renderer2d.cpp

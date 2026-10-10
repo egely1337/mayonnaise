@@ -28,7 +28,8 @@ public:
     void pointerLeave();
     void scroll(const ScrollEvent& e);
     void magnify(const MagnifyEvent& e);
-    void keyDown(const KeyEvent& e);
+    /// Returns whether anything (widget, Tab navigation, the unhandled-key hook, overlay Escape) used it.
+    bool keyDown(const KeyEvent& e);
     void textInput(const TextInputEvent& e);
 
     void setFocus(Widget* widget, bool visible);

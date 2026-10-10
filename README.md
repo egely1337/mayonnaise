@@ -66,6 +66,21 @@ background thread every 1–5 s (View menu); the app itself uses well under 1 % 
 Per-process network traffic isn't available on Linux without root/eBPF, so the Network tab lists open
 sockets per process; disk I/O per process is only readable for your own processes.
 
+### Terminal example
+
+`examples/terminal` is a terminal emulator in the style of macOS Terminal: xterm-256color with true colour,
+the alternate screen, mouse reporting, bracketed paste and OSC titles / working directory / clipboard;
+scrollback that re-wraps when the window is resized; tabs; selection (double-click words, triple-click
+lines), Ctrl+click links, colour profiles (Basic follows light/dark, Pro, Homebrew, Ocean, Solarized) and the
+system's monospace font with automatic fallbacks for CJK and symbols. Box drawing, block and braille
+characters are drawn as geometry, so `btop` and friends look right.
+
+```sh
+./build/examples/terminal/terminal ~/Projects
+```
+
+![Terminal](docs/screenshots/terminal.png)
+
 ### Settings
 
 Every app gets persistent preferences in `~/.config/mayonnaise/<app>/settings.conf` and follows the desktop's

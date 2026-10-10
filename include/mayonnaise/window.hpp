@@ -34,6 +34,9 @@ public:
     void close();
     /// Brings the window to the front (the compositor may only flash it on Wayland).
     void raise();
+    /// Asked when the user closes the window (close button, window manager); return false to keep it open,
+    /// e.g. to confirm first. close() itself is never vetoed.
+    void onCloseRequested(std::function<bool()> handler);
     /// Runs when the window has been closed (by the user or close()), before it is destroyed.
     void onClosed(std::function<void()> handler);
     void setFullscreen(bool fullscreen);

@@ -23,6 +23,10 @@ struct Window::Impl final : WidgetHost {
     bool needsLayout = true;
     bool closed = false;
     std::function<void()> closedHandler;
+    std::function<bool()> closeRequestHandler;
+    void requestClose() {
+        if (!closeRequestHandler || closeRequestHandler()) closed = true;
+    }
     std::string autosaveName;      // settings key prefix for the remembered size
     bool restoreMaximized = false;  // applied once the window is shown
     void rememberFrame();

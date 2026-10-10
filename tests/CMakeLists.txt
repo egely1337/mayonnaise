@@ -1,4 +1,4 @@
-add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp test_images.cpp test_settings.cpp)
+add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp test_images.cpp test_settings.cpp test_fonts.cpp)
 target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest mayonnaise_stb)
 # The library already compiles stb_image_write's implementation; tests only use the declarations.
 target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -10,4 +10,9 @@ if(MAYONNAISE_HAS_WNO_C2Y)
   target_compile_options(mayonnaise_tests PRIVATE -Wno-c2y-extensions)
 endif()
 mayonnaise_set_sanitizers(mayonnaise_tests)
+# The terminal example's emulation core has no UI dependencies; test it with the library.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_sources(mayonnaise_tests PRIVATE test_terminal_screen.cpp ${PROJECT_SOURCE_DIR}/examples/terminal/screen.cpp)
+  target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/examples/terminal)
+endif()
 add_test(NAME mayonnaise_tests COMMAND mayonnaise_tests)

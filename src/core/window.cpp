@@ -61,6 +61,7 @@ Size Window::size() const { return m_impl->platformWindow->sizeInPoints(); }
 void Window::close() { m_impl->closed = true; }
 void Window::raise() { m_impl->platformWindow->raise(); }
 void Window::onClosed(std::function<void()> handler) { m_impl->closedHandler = std::move(handler); }
+void Window::onCloseRequested(std::function<bool()> handler) { m_impl->closeRequestHandler = std::move(handler); }
 
 void Window::Impl::show() {
     platformWindow->show();
@@ -92,7 +93,7 @@ Window::Impl::Impl(const platform::WindowConfig& config)
       title(config.title) {
     root->setHost(this);
     root->setTitle(title);
-    root->onClose = [this] { closed = true; };
+    root->onClose = [this] { requestClose(); };
     root->onMinimize = [this] { platformWindow->minimize(); };
     root->onZoom = [this] { platformWindow->toggleMaximize(); };
     dispatcher.setRoot(root);
@@ -174,7 +175,7 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
         tooltipWidget.reset();
     };
     switch (event.type) {
-        case EventType::WindowClose: closed = true; break;
+        case EventType::WindowClose: requestClose(); break;
         case EventType::WindowResized:
         case EventType::WindowMaximized:
         case EventType::WindowRestored:
@@ -254,11 +255,8 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
         case EventType::KeyDown: {
             hideTooltip();
             KeyEvent e{event.key, event.modifiers, event.repeat};
-            if (e.primary() && e.key == Key::W) {
-                closed = true;
-                break;
-            }
-            dispatcher.keyDown(e);
+            // Ctrl+W closes the window only if nobody wanted the key (it deletes a word in a terminal).
+            if (!dispatcher.keyDown(e) && e.primary() && !e.shift() && e.key == Key::W) requestClose();
             break;
         }
         case EventType::TextInput: dispatcher.textInput(TextInputEvent{event.text}); break;

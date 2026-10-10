@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "../render/renderer2d.hpp"
+#include "mayonnaise/painter.hpp"
 #include "mayonnaise/theme.hpp"
 
 namespace mayo {
@@ -39,6 +40,32 @@ void drawRendererTestScene(render::Renderer2D& r, Size size, const Theme& theme)
     r.backdrop({60, 330, 300, 140}, 18, theme.material(Material::Sidebar));
     r.backdrop({400, 330, 300, 140}, 18, theme.material(Material::Glass));
     r.strokeRoundedRect({400, 330, 300, 140}, 18, Color::white(0.5f), 1);
+}
+
+void drawTextTestScene(Painter& p, Size size, const Theme& theme) {
+    const auto& c = theme.colors;
+    p.fillRect({0, 0, size.width, size.height}, c.windowBackground);
+    struct Row {
+        TextStyle style;
+        const char* name;
+    };
+    const Row rows[] = {
+        {TextStyle::LargeTitle, "Large Title"}, {TextStyle::Title1, "Title 1"}, {TextStyle::Title2, "Title 2"},
+        {TextStyle::Title3, "Title 3"},         {TextStyle::Headline, "Headline"}, {TextStyle::Body, "Body"},
+        {TextStyle::Callout, "Callout"},       {TextStyle::Subheadline, "Subheadline"},
+        {TextStyle::Footnote, "Footnote"},     {TextStyle::Caption, "Caption"},
+    };
+    float y = 40;
+    for (const auto& row : rows) {
+        Font f = theme.font(row.style);
+        p.drawText(row.name, {40, y + f.size}, f, c.label);
+        p.drawText("The quick brown fox jumps over the lazy dog — Ünïcödé 0123456789", {200, y + f.size}, f,
+                   c.secondaryLabel);
+        y += f.lineHeight + 10;
+    }
+    Rect box{40, y + 10, 240, 40};
+    p.fillRoundedRect(box, 8, c.accent);
+    p.drawText("Centred in a box", box, theme.font(TextStyle::Headline), c.onAccent, TextAlign::Center);
 }
 
 }  // namespace mayo

@@ -89,6 +89,7 @@ App::App() : m_impl(std::make_unique<Impl>()) {
 
 App::~App() {
     m_impl->windows.clear();
+    m_impl->text.reset();
     m_impl->renderer.reset();
 
     platform::Platform::shutdown();
@@ -111,7 +112,10 @@ Window& App::createWindow(const WindowOptions& options) {
         std::fprintf(stderr, "mayonnaise: failed to load OpenGL 3.3 functions\n");
         std::abort();
     }
-    if (!m_impl->renderer) m_impl->renderer = std::make_unique<render::Renderer2D>();
+    if (!m_impl->renderer) {
+        m_impl->renderer = std::make_unique<render::Renderer2D>();
+        m_impl->text = std::make_unique<render::TextSystem>();
+    }
     auto window = std::unique_ptr<Window>(new Window(std::move(impl)));
     Window& ref = *window;
     m_impl->windows.push_back(std::move(window));

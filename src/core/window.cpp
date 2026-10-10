@@ -6,10 +6,13 @@
 #include "../render/renderer2d.hpp"
 #include "app_impl.hpp"
 #include "mayonnaise/app.hpp"
+#include "mayonnaise/painter.hpp"
+#include <string>
 
 namespace mayo {
 
 void drawRendererTestScene(render::Renderer2D& r, Size size, const Theme& theme);
+void drawTextTestScene(Painter& p, Size size, const Theme& theme);
 
 Window::Window(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) { m_impl->self = this; }
 Window::~Window() = default;
@@ -56,8 +59,10 @@ void Window::Impl::render() {
     Rect bounds{0, 0, size.width, size.height};
     r.fillRoundedRect(bounds, radius, theme.colors.windowBackground);
     r.pushClip(bounds, radius);
-    static const bool testScene = std::getenv("MAYO_TEST_SCENE") != nullptr;
-    if (testScene) drawRendererTestScene(r, size, theme);
+    Painter painter(r, *app.impl().text);
+    static const std::string testScene = std::getenv("MAYO_TEST_SCENE") ? std::getenv("MAYO_TEST_SCENE") : "";
+    if (testScene == "text") drawTextTestScene(painter, size, theme);
+    else if (!testScene.empty()) drawRendererTestScene(r, size, theme);
     r.popClip();
     // Hairline border + inner highlight, like a macOS window edge.
     if (rounded) {

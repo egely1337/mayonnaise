@@ -51,6 +51,10 @@ public:
     void popOpacity();
 
     [[nodiscard]] int drawCallsLastFrame() const { return m_drawCallsLast; }
+    /// Submits queued primitives if the current batch samples `texture` (before it is modified).
+    void flushIfUsing(GLuint texture) {
+        if (m_batchTexture == texture) flush();
+    }
 
 private:
     struct Instance {
@@ -85,7 +89,6 @@ private:
     gl::Texture m_whiteTexture;
     GLint m_uViewport = -1;
     GLint m_uTexture = -1;
-    GLint m_uViewportBlur[2] = {-1, -1};
 
     gl::RenderTarget m_scene;
     std::vector<gl::RenderTarget> m_blurChain;

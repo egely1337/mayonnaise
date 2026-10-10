@@ -5,8 +5,11 @@ add_library(mayonnaise
   core/window.cpp
   platform/sdl_platform.cpp
   render/gl.cpp
+  render/font.cpp
   render/image_io.cpp
+  render/painter.cpp
   render/renderer2d.cpp
+  render/text_system.cpp
   theme/theme.cpp
 )
 add_library(mayonnaise::mayonnaise ALIAS mayonnaise)

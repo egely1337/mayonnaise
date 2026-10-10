@@ -113,6 +113,42 @@ the freedesktop.org Trash, so items trashed here show up in other file managers 
 |---|---|
 | ![](docs/screenshots/finder.png) | ![](docs/screenshots/finder-columns-dark.png) |
 
+### System Settings example
+
+`examples/system_settings` is a System Settings-style control centre for GNOME on GNU/Linux. It changes the
+real desktop: every panel reads and writes the same GSettings keys and D-Bus services as GNOME Settings and
+follows changes made elsewhere while it's open.
+
+- **Wi-Fi / Network / Bluetooth** — NetworkManager (join, password prompt, hidden networks, forget,
+  auto-join, details, airplane mode, wired, VPN import, proxy) and BlueZ (power, pair, connect, forget,
+  battery levels).
+- **Displays / Sound / Power** — Mutter's DisplayConfig (resolution, refresh rate, VRR, scale, orientation,
+  primary display, with a 20-second "Keep these settings?" revert), backlight via logind, Night Light;
+  PipeWire/PulseAudio via `pactl` (devices, ports, volume, balance, per-app volume); UPower battery state,
+  health and peripherals, power-profiles-daemon modes, suspend and power-button behaviour.
+- **Appearance / Multitasking / Notifications / Search / Apps** — light/dark, GNOME accent colours,
+  wallpapers (thumbnails from GNOME's cache), fonts, themes, workspaces and window behaviour, per-app
+  notifications, search providers and locations, default apps.
+- **Mouse & Touchpad / Keyboard / Accessibility / Privacy / Wellbeing** — pointer and touchpad options,
+  input sources, XKB options, a shortcut recorder and custom shortcuts, the accessibility switches, screen
+  lock, location, camera/microphone, file history, screen-time limits and break reminders.
+- **Region & Language / Date & Time / Users / About** — AccountsService and systemd's localed, timedated
+  and hostnamed (language, formats, time zone search, NTP, account picture and name, device name, hardware).
+
+```sh
+./build/examples/system_settings/system_settings            # last panel
+./build/examples/system_settings/system_settings bluetooth  # like gnome-control-center bluetooth
+SETTINGS_READ_ONLY=1 ./build/examples/system_settings/system_settings   # look, never change anything
+```
+
+It needs GIO (`libglib2.0-dev` / `glib2-devel`) and is skipped without it. Missing services (no
+power-profiles-daemon, no Bluetooth, another desktop's schemas) disable or hide the affected rows instead of
+failing.
+
+| Appearance (dark) | Displays (light) |
+|---|---|
+| ![](docs/screenshots/system-settings.png) | ![](docs/screenshots/system-settings-displays.png) |
+
 ## Hello World
 
 ```cpp

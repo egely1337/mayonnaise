@@ -31,6 +31,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/task_manager/task_manager                    # Linux only
 ./build/examples/finder/finder [folder]                         # Linux only
 ./build/examples/terminal/terminal [directory]                  # Linux only
+./build/examples/system_settings/system_settings [panel]        # Linux + GIO; changes the real desktop!
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -46,6 +47,9 @@ Useful environment variables:
   examples at startup for screenshots. The finder takes comma-separated steps, including file operations
   (`MAYO_DEMO="list,select:a.txt,duplicate:a.txt,wait:0.3,undo"`, full list in its main.cpp); point it at a
   scratch folder, and it never launches other programs in demo mode.
+  System settings: `MAYO_DEMO=<panel>[:action]` (actions: `wifi:other`, `displays:keep`, `appearance:fonts`,
+  `keyboard:add`, `keyboard:shortcut`, `datetime:zones`); screenshot runs and `SETTINGS_READ_ONLY=1` never write
+  GSettings, D-Bus or nmcli/pactl state (Mutter is only asked to *verify* display configs).
 - `MAYO_VERBOSE=2` — also print frames per second (find widgets that never stop requesting frames).
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
@@ -81,7 +85,7 @@ src/theme/            light/dark themes, type scale
 shaders/              GLSL, embedded at build time (cmake/Embed.cmake -> generated .cpp)
 assets/fonts/         InterVariable.ttf (OFL) + license, embedded at build time
 third_party/          vendored glad (generated GL 3.3 core + KHR_debug) and stb single headers
-examples/             hello, gallery, settings_app
+examples/             photos, video_player, task_manager, finder, terminal, system_settings
 tests/                doctest unit tests (geometry, color, theme, layout, event dispatch)
 ```
 
@@ -145,6 +149,10 @@ Known issues / next steps:
 - Popups have a fade-in but no fade-out (they're removed immediately on dismiss).
 - Menus open below their button; macOS pop-up buttons overlay the selected row on the button.
 - Single-line TextField only; no multi-line text editor.
+- System settings example: no Printers, Online Accounts, Sharing or Color panels; displays can't be dragged to
+  rearrange (side-by-side packing only); the shortcut recorder can't capture keys the compositor grabs
+  (Super+arrows) because SDL doesn't expose the keyboard-shortcuts-inhibit protocol; passwords are changed
+  with `passwd`, not in the app. Clicking through the panels was only verified via MAYO_DEMO screenshots.
 
 ## Decisions
 
@@ -179,6 +187,16 @@ Known issues / next steps:
   tests/test_terminal_screen.cpp; `Pty` reads on a worker thread with back-pressure (4 MB) and never blocks
   the UI on writes; `TerminalView` snaps cells to whole device pixels and draws box drawing, blocks, braille
   and powerline glyphs as geometry so they join between cells.
+- **System Settings example** (examples/system_settings) talks to GNOME through GIO (the only example with a
+  GLib dependency, skipped without it). GLib's default main context runs on a background thread (`gx::start`);
+  GSettings objects, D-Bus subscriptions and async calls are created on the UI thread, so their callbacks fire
+  on that thread and hop over with `App::post` — panels never see GLib's thread. `gx::Key` wraps one key and
+  never aborts on a missing schema (g_settings_new does); `ui::toggleRow/pickerRow/sliderRow` bind a control to
+  a key both ways. Wi-Fi/wired state comes from `nmcli -t` refreshed by `nmcli monitor`, but joining a
+  protected network uses NetworkManager's D-Bus API so passwords never appear in argv. Sound uses `pactl -f
+  json` + `pactl subscribe` (tiny JSON reader in json.cpp). Display changes are applied *temporarily* and made
+  persistent only after "Keep Changes" (20 s auto-revert). Each complex panel is a model object owned by its
+  page (`ui::page(sections, model)`), so callbacks capture a raw `this` without shared_ptr cycles.
 - **Settings** (`mayo::Settings`, `App::settings()`): one `key = value` file per app in
   `~/.config/mayonnaise/<app>/settings.conf`, written atomically 0.5 s after the last change and on exit.
   The App stores `appearance` (system/light/dark), `accent` (system or #RRGGBB) and `window.<name>.*` for
@@ -229,6 +247,19 @@ Known issues / next steps:
   `-Wmissing-field-initializers` fires in every example using `{.title = ...}`.
 - **Windows popped up by screenshot runs take keyboard focus**, so typing elsewhere during a run lands in the
   app (type-to-select in the finder). Don't trust a surprising selection in a screenshot without a trace.
+
+- **XDG_CONFIG_HOME also moves dconf.** GSettings reads `$XDG_CONFIG_HOME/dconf/user`, so pointing it at a
+  scratch dir makes the system settings example show schema defaults (e.g. "No input sources"). Leave it alone
+  for that example; screenshot runs are read-only anyway. Test writes with `GSETTINGS_BACKEND=memory`.
+- **hostnamed, timedated and localed are D-Bus activated**: synchronous calls must allow auto-start
+  (`G_DBUS_CALL_FLAGS_NONE`), or they fail while the service is idle. power-profiles-daemon may be masked
+  (it is on the dev machine); the Power panel then hides Power Mode.
+- **GNOME 50 has no brightness setter on the session bus** (gsd-power's Screen interface is gone; the Shell
+  one only dims). The Displays panel writes the backlight through logind's `Session.SetBrightness`.
+- **`pactl -f json` prints "Invalid ASCII character" to stderr** for some property values even with
+  LC_ALL=C.UTF-8; stdout is still valid JSON.
+- **Range-for over a temporary's member** (`for (auto& x : parse(t).array())`) dangles in C++20 — GCC's
+  -Wdangling-reference caught it; bind the parsed value to a local first.
 
 - **Task manager sampling**: one pass over /proc takes ~10 ms for ~400 processes, done on a worker thread;
   the uid comes from stat()ing /proc/<pid> (cheaper than parsing status), names from argv[0] because comm is

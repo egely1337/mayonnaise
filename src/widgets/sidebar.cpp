@@ -63,7 +63,9 @@ void SidebarView::setHeader(std::shared_ptr<Widget> header) {
 }
 
 float SidebarView::rowHeight(const SidebarItem& item) const {
-    return item.isHeader ? 24.0f : theme().metrics.rowHeight;
+    // An untitled header is just a gap between groups (System Settings style).
+    if (item.isHeader) return item.title.empty() ? 12.0f : 24.0f;
+    return theme().metrics.rowHeight;
 }
 
 float SidebarView::listTop() const {

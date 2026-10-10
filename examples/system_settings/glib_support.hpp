@@ -1,0 +1,193 @@
+// GLib / GIO glue for the Settings example: GSettings keys, D-Bus calls and subprocesses, with every
+// callback delivered on the UI thread.
+//
+// GLib's default main context runs on a background thread (start()). GSettings objects, D-Bus signal
+// subscriptions and async calls are all created on the UI thread, whose thread-default context is that
+// global default, so GLib dispatches their callbacks on the background thread; those only hop over with
+// App::post. Panels therefore never see GLib's thread.
+#pragma once
+
+#include <gio/gio.h>
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace mayo {
+class App;
+}
+
+namespace gx {
+
+struct VariantUnref {
+    void operator()(GVariant* v) const {
+        if (v) g_variant_unref(v);
+    }
+};
+/// Owning GVariant reference.
+using Variant = std::unique_ptr<GVariant, VariantUnref>;
+/// Takes a full reference (and sinks a floating one).
+inline Variant hold(GVariant* v) { return Variant(v ? g_variant_ref_sink(v) : nullptr); }
+
+struct ObjectUnref {
+    void operator()(gpointer o) const {
+        if (o) g_object_unref(o);
+    }
+};
+template <class T>
+using Object = std::unique_ptr<T, ObjectUnref>;
+
+// Lifetime -------------------------------------------------------------------------------------------
+
+/// Starts GLib's main loop thread. Call once, after the App exists.
+void start(mayo::App& app);
+/// Stops subprocess streams and the main loop thread and drops every callback. Call before the App dies.
+void stop();
+/// Runs `fn` on the UI thread (no-op once stopped).
+void toUi(std::function<void()> fn);
+
+/// Read-only mode (screenshot / demo runs): every write to the system is skipped and reported as done.
+void setReadOnly(bool readOnly);
+[[nodiscard]] bool readOnly();
+
+// GSettings ------------------------------------------------------------------------------------------
+
+[[nodiscard]] bool hasSchema(const std::string& schema);
+
+/// One key of a GSettings schema. A missing schema or key (another desktop, an older GNOME) makes the key
+/// unavailable instead of aborting the process, which is what g_settings_new does.
+class Key {
+public:
+    Key() = default;
+    /// `path` is for relocatable schemas (per-application notification settings).
+    Key(const std::string& schema, std::string key, const std::string& path = {});
+
+    [[nodiscard]] bool available() const { return m_settings != nullptr; }
+    explicit operator bool() const { return available(); }
+    [[nodiscard]] const std::string& name() const { return m_key; }
+    [[nodiscard]] GSettings* settings() const { return m_settings; }
+    /// GVariant type string of the value ("b", "s", "i", "u", "d", "as", "a(ss)"...).
+    [[nodiscard]] std::string type() const;
+
+    [[nodiscard]] Variant value() const;
+    [[nodiscard]] bool getBool(bool fallback = false) const;
+    [[nodiscard]] std::int64_t getInt(std::int64_t fallback = 0) const;  ///< i, u, x, t, y, n, q
+    [[nodiscard]] double getDouble(double fallback = 0) const;           ///< d (and integers)
+    [[nodiscard]] std::string getString(const std::string& fallback = {}) const;  ///< s and enum nicks
+    [[nodiscard]] std::vector<std::string> getStrv() const;
+    /// The value as text: strings verbatim, numbers in decimal, booleans "true"/"false".
+    [[nodiscard]] std::string getText() const;
+
+    void set(bool v) const;
+    void setInt(std::int64_t v) const;
+    void setDouble(double v) const;
+    void setString(const std::string& v) const;
+    void setStrv(const std::vector<std::string>& v) const;
+    /// Parses `text` the way getText() writes it, for the key's own type.
+    void setText(const std::string& text) const;
+    /// Takes ownership of a floating variant.
+    void setValue(GVariant* v) const;
+    void reset() const;
+    [[nodiscard]] bool isDefault() const;
+
+    /// Allowed range of a numeric key ("range" in the schema), if any.
+    [[nodiscard]] std::optional<std::pair<double, double>> range() const;
+    /// Allowed values of an enum/choices key.
+    [[nodiscard]] std::vector<std::string> choices() const;
+
+    /// `fn` runs on the UI thread whenever the key changes, from this app or any other.
+    void watch(std::function<void()> fn) const;
+
+private:
+    GSettings* m_settings = nullptr;  // owned by a process-wide cache
+    std::string m_key;
+};
+
+// D-Bus ----------------------------------------------------------------------------------------------
+
+[[nodiscard]] GDBusConnection* systemBus();
+[[nodiscard]] GDBusConnection* sessionBus();
+
+/// Whether a name currently has an owner on `bus` (a service that is running or activatable is not
+/// distinguished; activatable names are reported as present).
+[[nodiscard]] bool hasName(GDBusConnection* bus, const char* name);
+
+/// Synchronous property read (short timeout); nullptr on any error. Returns the unboxed value.
+[[nodiscard]] Variant property(GDBusConnection* bus, const char* name, const char* path, const char* iface,
+                               const char* prop);
+/// All properties of an interface as a{sv}; nullptr on error.
+[[nodiscard]] Variant properties(GDBusConnection* bus, const char* name, const char* path, const char* iface);
+/// Synchronous call for quick reads at panel construction; nullptr on error (message in `error`).
+[[nodiscard]] Variant callSync(GDBusConnection* bus, const char* name, const char* path, const char* iface,
+                               const char* method, GVariant* params, const char* replyType = nullptr,
+                               std::string* error = nullptr, int timeoutMs = 3000);
+
+using Reply = std::function<void(Variant reply, const std::string& error)>;
+/// Asynchronous call that only reads. `done` runs on the UI thread.
+void call(GDBusConnection* bus, const char* name, const char* path, const char* iface, const char* method,
+          GVariant* params, Reply done, int timeoutMs = 25000);
+/// Asynchronous call that changes something; skipped in read-only mode. Allows polkit to ask for a password.
+void perform(GDBusConnection* bus, const char* name, const char* path, const char* iface, const char* method,
+             GVariant* params, Reply done = {}, int timeoutMs = 120000);
+void setProperty(GDBusConnection* bus, const char* name, const char* path, const char* iface, const char* prop,
+                 GVariant* value, Reply done = {});
+
+using SignalFn = std::function<void(const std::string& path, const std::string& member, GVariant* params)>;
+/// Subscribes to a signal (null arguments are wildcards); `fn` runs on the UI thread.
+void subscribe(GDBusConnection* bus, const char* sender, const char* iface, const char* member, const char* path,
+               SignalFn fn);
+
+// Variant helpers --------------------------------------------------------------------------------------
+
+[[nodiscard]] std::string str(GVariant* v);
+[[nodiscard]] Variant lookup(GVariant* dict, const char* key);  ///< value of an a{sv} entry
+[[nodiscard]] std::string lookupString(GVariant* dict, const char* key, const std::string& fallback = {});
+[[nodiscard]] bool lookupBool(GVariant* dict, const char* key, bool fallback = false);
+[[nodiscard]] double lookupDouble(GVariant* dict, const char* key, double fallback = 0);
+[[nodiscard]] std::int64_t lookupInt(GVariant* dict, const char* key, std::int64_t fallback = 0);
+[[nodiscard]] std::vector<std::string> strv(GVariant* v);
+
+// Desktop entries -------------------------------------------------------------------------------------
+
+/// Display name of an installed application ("org.gnome.Nautilus.desktop" -> "Files"); empty if unknown.
+[[nodiscard]] std::string appName(const std::string& desktopId);
+
+// Subprocesses ---------------------------------------------------------------------------------------
+
+struct ProcessResult {
+    int status = -1;  ///< exit status, -1 when the program could not be started
+    std::string out;
+    std::string err;
+    [[nodiscard]] bool ok() const { return status == 0; }
+};
+
+[[nodiscard]] bool haveProgram(const char* name);
+/// Blocking run for quick reads while building a panel.
+[[nodiscard]] ProcessResult runSync(const std::vector<std::string>& argv);
+/// Runs asynchronously; `done` on the UI thread. `mutates` runs are skipped in read-only mode.
+void run(const std::vector<std::string>& argv, std::function<void(ProcessResult)> done = {}, bool mutates = true);
+/// Long-running process (pactl subscribe, nmcli monitor) whose stdout lines arrive on the UI thread.
+/// Killed by stop().
+void stream(const std::vector<std::string>& argv, std::function<void(const std::string& line)> onLine);
+
+/// Runs `work` on a background worker thread (decoding thumbnails, slow files); deliver results with toUi().
+/// Pending work is dropped by stop(), which waits for the running item.
+void background(std::function<void()> work);
+
+// UI-thread helpers -----------------------------------------------------------------------------------
+
+/// Coalesces bursts of change notifications into one call `delay` seconds after the first.
+class Debounce {
+public:
+    Debounce(double delay, std::function<void()> fn);
+    void operator()();
+
+private:
+    struct State;
+    std::shared_ptr<State> m_state;
+};
+
+}  // namespace gx

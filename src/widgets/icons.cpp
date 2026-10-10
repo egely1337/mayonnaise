@@ -427,6 +427,49 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.poly({{13.5f, 3}, {17, 6.5f}, {7, 16.5f}, {3, 17}, {3.5f, 13}}, true);
             pen.line(11.5f, 5, 15, 8.5f);
             break;
+        case Icon::Mouse:
+            pen.rrect(5.5f, 2.5f, 9, 15, 4.5f);
+            pen.line(10, 2.8f, 10, 8);
+            pen.line(5.6f, 8, 14.4f, 8);
+            break;
+        case Icon::Accessibility:
+            pen.circle(10, 10, 8.5f);
+            pen.dot(10, 5.6f, 1.3f);
+            pen.line(5.5f, 8.2f, 14.5f, 8.2f);
+            pen.line(10, 8.2f, 10, 11.5f);
+            pen.poly({{7.3f, 15.5f}, {10, 11.5f}, {12.7f, 15.5f}});
+            break;
+        case Icon::Network:
+            pen.rrect(7.5f, 2.5f, 5, 4, 1);
+            pen.rrect(2.5f, 13.5f, 5, 4, 1);
+            pen.rrect(12.5f, 13.5f, 5, 4, 1);
+            pen.line(10, 6.5f, 10, 10);
+            pen.poly({{5, 13.5f}, {5, 10}, {15, 10}, {15, 13.5f}});
+            break;
+        case Icon::Windows:
+            pen.rrect(2.5f, 6, 11, 9, 1.8f);
+            pen.poly({{6.5f, 6}, {6.5f, 3}, {17.5f, 3}, {17.5f, 12}, {13.5f, 12}});
+            break;
+        case Icon::Hourglass:
+            pen.line(5, 2.5f, 15, 2.5f);
+            pen.line(5, 17.5f, 15, 17.5f);
+            pen.poly({{6, 2.5f}, {6, 5.5f}, {10, 10}, {6, 14.5f}, {6, 17.5f}});
+            pen.poly({{14, 2.5f}, {14, 5.5f}, {10, 10}, {14, 14.5f}, {14, 17.5f}});
+            break;
+        case Icon::Shield:
+            pen.poly({{10, 2.5f}, {16.5f, 5}, {16, 11}, {10, 17.5f}, {4, 11}, {3.5f, 5}}, true);
+            pen.poly({{7.2f, 10}, {9.3f, 12.2f}, {13, 7.8f}});
+            break;
+        case Icon::Printer:
+            pen.rrect(2.5f, 7, 15, 7.5f, 1.8f);
+            pen.poly({{5.5f, 7}, {5.5f, 2.5f}, {14.5f, 2.5f}, {14.5f, 7}});
+            pen.rrect(5.5f, 11.5f, 9, 6, 0.8f);
+            break;
+        case Icon::Sparkles:
+            pen.poly({{8, 3}, {9.5f, 8.5f}, {15, 10}, {9.5f, 11.5f}, {8, 17}, {6.5f, 11.5f}, {1, 10}, {6.5f, 8.5f}}, true);
+            pen.line(15, 2.5f, 15, 6.5f);
+            pen.line(13, 4.5f, 17, 4.5f);
+            break;
     }
 }
 

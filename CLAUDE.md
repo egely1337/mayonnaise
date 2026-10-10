@@ -28,6 +28,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/settings_app/settings_app
 ./build/examples/photos/photos <images or folders...>
 ./build/examples/video_player/video_player <media files...>   # only built when FFmpeg dev libs exist
+./build/examples/task_manager/task_manager                    # Linux only
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -168,6 +169,12 @@ Known issues / next steps:
   `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
 ## Gotchas
+
+- **Task manager sampling**: one pass over /proc takes ~10 ms for ~400 processes, done on a worker thread;
+  the uid comes from stat()ing /proc/<pid> (cheaper than parsing status), names from argv[0] because comm is
+  truncated to 15 chars — but Chromium/Electron rewrite argv[0] into one space-separated title, so cut at
+  the first space. Disk stats use whole devices that have /sys/block/<dev>/device (partitions, zram, loop and
+  dm would double count). Never let a demo path call kill(): the quit demo only opens the confirmation.
 
 - **Video player threading**: demux, video decode and audio decode threads; seeking bumps a serial number so
   every stage drops stale packets/frames without locks across stages. Audio is the clock

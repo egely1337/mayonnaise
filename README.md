@@ -52,6 +52,20 @@ on Ubuntu, `ffmpeg-free-devel` on Fedora); without them CMake simply skips this 
 
 ![Video player](docs/screenshots/video-player.png)
 
+### Task manager example
+
+`examples/task_manager` is an Activity Monitor-style system monitor for Linux: CPU, Memory, Disk and Network
+tabs, each with live history graphs (CPU load stacked by user/system, per-core bars, memory pressure,
+mirrored read/write and in/out graphs), volumes with capacity bars, network interfaces with addresses, and a
+sortable, resizable, searchable process table (filters: all / mine / other users / active). Double-click a
+process to inspect it; Quit (SIGTERM) and Force Quit (SIGKILL) ask for confirmation. Sampling runs on a
+background thread every 1–5 s (View menu); the app itself uses well under 1 % CPU.
+
+![Task manager](docs/screenshots/task-manager.png)
+
+Per-process network traffic isn't available on Linux without root/eBPF, so the Network tab lists open
+sockets per process; disk I/O per process is only readable for your own processes.
+
 ## Hello World
 
 ```cpp

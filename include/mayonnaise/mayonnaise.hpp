@@ -18,4 +18,5 @@
 #include "widgets/label.hpp"
 #include "widgets/slider.hpp"
 #include "widgets/toggle.hpp"
+#include "widgets/toolbar.hpp"
 #include "window.hpp"

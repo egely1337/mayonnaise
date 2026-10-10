@@ -66,6 +66,8 @@ public:
     virtual void setClipboardText(const std::string& text) = 0;
     virtual void setTextInput(bool active, Rect caret) = 0;
     [[nodiscard]] virtual Size windowSize() const = 0;
+    /// Height of the window's title bar / toolbar strip. Full-size content insets by this.
+    [[nodiscard]] virtual float titleBarHeight() const { return 0; }
 };
 
 /// A node in the retained widget tree. Subclass to make custom widgets: override measureContent,
@@ -169,6 +171,12 @@ public:
     /// Drawn after children (focus rings, overlays within the widget).
     virtual void drawOverlay(Painter& painter);
     [[nodiscard]] virtual bool expandsContent(Axis /*axis*/) const { return false; }
+    /// Root content only: draw under the title bar (sidebar layouts). The content then insets
+    /// itself by host()->titleBarHeight() where needed.
+    [[nodiscard]] virtual bool extendsIntoTitleBar() const { return false; }
+    /// Root content only: x (window points) where the title and toolbar may start, e.g. the
+    /// trailing edge of a sidebar.
+    [[nodiscard]] virtual float titleBarLeadingEdge() const { return 0; }
 
     [[nodiscard]] virtual bool acceptsFocus() const { return false; }
     /// Controls return true so title-bar drag regions don't swallow their clicks.

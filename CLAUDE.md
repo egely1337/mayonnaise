@@ -105,7 +105,17 @@ framebuffer → swap. If any animation is still running, another frame is schedu
 
 ## Current status
 
-See bottom of file (updated after every milestone).
+- [x] M1 Skeleton — CMake, deps, SDL3 window + GL 3.3 core context
+- [x] M2 Renderer2D — instanced SDF quads, shadows, gradients, lines/arcs, rounded clips, dual-Kawase backdrop blur
+- [x] M3 Text — FreeType + InterVariable (wght/opsz), glyph atlas w/ 1/4 px subpixel positioning, type scale, wrapping
+- [x] M4 Core — widget tree, measure/arrange stacks, event dispatcher (hover/capture/focus/Tab/overlays), Animated<T>
+- [x] M5 Basic widgets — Label, Button (5 styles), Toggle, Checkbox, Slider, Divider, vector icons
+- [x] M6 Window chrome — borderless transparent window, traffic lights, hit-test drag/resize, unified Toolbar
+- [ ] M7 Materials — translucent sidebar, popover/menu
+- [ ] M8 TextField, SegmentedControl, ProgressBar, ScrollView, SplitView
+- [ ] M9 Polish
+
+Next: M7.
 
 ## Decisions
 

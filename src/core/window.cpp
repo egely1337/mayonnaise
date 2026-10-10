@@ -34,6 +34,13 @@ void Window::setContent(const Element& content) {
     m_impl->requestLayout();
 }
 
+void Window::setToolbar(const Element& toolbar) {
+    m_impl->root->setToolbar(toolbar.widget());
+    m_impl->requestLayout();
+}
+
+float Window::Impl::titleBarHeight() const { return root->titleBarHeight(); }
+
 void Window::setTitle(const std::string& title) {
     m_impl->title = title;
     m_impl->platformWindow->setTitle(title);

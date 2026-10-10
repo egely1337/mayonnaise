@@ -11,15 +11,18 @@ namespace mayo {
 
 class TitleBarView;
 
-/// Root of every window: background, content, and the client-side title bar with traffic lights.
+/// Root of every window: background, content, and the client-side title bar with traffic lights
+/// and optional unified toolbar.
 class WindowRootView final : public Widget {
 public:
     WindowRootView();
 
     void setContent(std::shared_ptr<Widget> content);
+    void setToolbar(std::shared_ptr<Widget> toolbar);
     void setTitle(const std::string& title);
     void setWindowState(bool maximized, bool key, bool transparent);
     [[nodiscard]] float windowRadius() const;
+    [[nodiscard]] float titleBarHeight() const;
     [[nodiscard]] bool isKey() const { return m_key; }
 
     Size measureContent(Size available) override;

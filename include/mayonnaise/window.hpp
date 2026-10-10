@@ -17,6 +17,8 @@ public:
     Window& operator=(const Window&) = delete;
 
     void setContent(const Element& content);
+    /// Toolbar items shown in the unified title bar (typically a mayo::Toolbar).
+    void setToolbar(const Element& toolbar);
     void setTitle(const std::string& title);
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;

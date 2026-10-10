@@ -1,7 +1,9 @@
 #include "window_root.hpp"
 
 #include <algorithm>
+#include <cmath>
 
+#include "../render/font.hpp"
 #include "mayonnaise/app.hpp"
 #include "mayonnaise/painter.hpp"
 
@@ -92,7 +94,8 @@ private:
 
 }  // namespace
 
-/// Title bar strip: draggable, centred title, traffic lights on the left.
+/// Title bar strip: draggable, traffic lights on the left, centred title or a leading title
+/// followed by toolbar items.
 class TitleBarView final : public Widget {
 public:
     TitleBarView() : m_lights(std::make_shared<TrafficLightsView>()) {
@@ -101,34 +104,74 @@ public:
     }
     std::string title;
     bool key = true;
+    bool fullSize = false;
+    float leadingEdge = 0;
     std::shared_ptr<TrafficLightsView> m_lights;
+    std::shared_ptr<Widget> toolbar;
+
+    void setToolbar(std::shared_ptr<Widget> t) {
+        if (toolbar) removeChild(toolbar.get());
+        toolbar = std::move(t);
+        if (toolbar) addChild(toolbar);
+    }
+    [[nodiscard]] float height() const { return toolbar ? theme().metrics.titlebarHeight : 32.0f; }
+    [[nodiscard]] Font titleFont() const {
+        return toolbar ? theme().font(TextStyle::Title3) : theme().font(TextStyle::Headline);
+    }
+    [[nodiscard]] float titleStart() const {
+        float start = m_lights->frame().right() + 16;
+        if (fullSize && leadingEdge > 0) start = std::max(start, leadingEdge + 16);
+        return start;
+    }
 
     Size measureContent(Size available) override {
         m_lights->measure(available);
-        return {available.width, 32};
+        if (toolbar) toolbar->measure({available.width, height()});
+        return {available.width, height()};
     }
     void arrangeContent(const Rect& content) override {
         const auto& m = theme().metrics;
         Size s = m_lights->measure(content.size());
+        // Traffic lights centre in the strip but never sink below a 32pt bar's centre line
+        // when there's a tall toolbar (macOS keeps them aligned with toolbar items).
         m_lights->arrange({content.x + m.trafficLightInset - m.trafficLightSize * 0.5f + 2,
                            content.center().y - s.height * 0.5f, s.width, s.height});
+        if (toolbar) {
+            float x = titleStart();
+            if (!title.empty()) x += std::ceil(measureTitle()) + 20;
+            float right = content.right() - 12;
+            toolbar->measure({std::max(0.0f, right - x), content.height});
+            toolbar->arrange({x, content.y, std::max(0.0f, right - x), content.height});
+        }
     }
+    [[nodiscard]] float measureTitle() const;
+
     void draw(Painter& p) override {
         const Theme& t = theme();
+        Rect r = frame();
+        if (fullSize) {
+            // Scroll-edge glass over content that slides under the toolbar; fades out at the bottom.
+            float x = leadingEdge > 0 ? leadingEdge : r.x;
+            MaterialStyle m = t.material(Material::Titlebar);
+            m.fadeBottom = 0.45f;
+            p.drawMaterial({x, r.y, r.right() - x, r.height + 10}, {}, m);
+        }
         if (!title.empty()) {
-            Font f = t.font(TextStyle::Headline);
+            Font f = titleFont();
             Color c = key ? t.colors.label : t.colors.tertiaryLabel;
-            Rect r = frame();
-            float left = m_lights->frame().right() + 12;
             float w = p.measureText(title, f);
-            float x = std::max(left, r.center().x - w * 0.5f);
-            p.pushClip({left, r.y, std::max(0.0f, r.right() - left - 12), r.height});
+            float left = titleStart();
+            float x = toolbar ? left : std::max(left, r.center().x - w * 0.5f);
+            float limit = toolbar ? toolbar->frame().x - 8 : r.right() - 12;
+            p.pushClip({left, r.y, std::max(0.0f, limit - left), r.height});
             p.drawText(title, {x, r.y, w, r.height}, f, c);
             p.popClip();
         }
         paintChildren(p);
     }
 };
+
+float TitleBarView::measureTitle() const { return title.empty() ? 0.0f : render::measureText(title, titleFont()); }
 
 WindowRootView::WindowRootView() : m_titleBar(std::make_shared<TitleBarView>()) {
     addChild(m_titleBar);
@@ -150,9 +193,14 @@ void WindowRootView::setContent(std::shared_ptr<Widget> content) {
     if (m_content) insertChild(0, m_content);
 }
 
+void WindowRootView::setToolbar(std::shared_ptr<Widget> toolbar) {
+    m_titleBar->setToolbar(std::move(toolbar));
+    invalidateLayout();
+}
+
 void WindowRootView::setTitle(const std::string& title) {
     m_titleBar->title = title;
-    invalidate();
+    invalidateLayout();
 }
 
 void WindowRootView::setWindowState(bool maximized, bool key, bool transparent) {
@@ -167,18 +215,23 @@ float WindowRootView::windowRadius() const {
     return m_transparent && !m_maximized ? theme().metrics.windowRadius : 0.0f;
 }
 
-Size WindowRootView::measureContent(Size available) {
-    m_titleBar->measure(available);
-    if (m_content) m_content->measure({available.width, std::max(0.0f, available.height - 32)});
-    return available;
-}
+float WindowRootView::titleBarHeight() const { return m_titleBar->height(); }
+
+Size WindowRootView::measureContent(Size available) { return available; }
 
 void WindowRootView::arrangeContent(const Rect& content) {
-    const float barH = 32;
+    const float barH = titleBarHeight();
+    const bool fullSize = m_content && m_content->extendsIntoTitleBar();
+    if (m_content) {
+        Rect area = fullSize ? content : Rect{content.x, content.y + barH, content.width, content.height - barH};
+        m_content->measure(area.size());
+        m_content->arrange(area);
+    }
+    m_titleBar->fullSize = fullSize;
+    m_titleBar->leadingEdge = fullSize ? m_content->titleBarLeadingEdge() : 0.0f;
+    m_titleBar->measure({content.width, barH});
     m_titleBar->arrange({content.x, content.y, content.width, barH});
-    if (m_content) m_content->arrange({content.x, content.y + barH, content.width, content.height - barH});
 }
-
 void WindowRootView::draw(Painter& p) {
     const Theme& t = theme();
     const float radius = windowRadius();

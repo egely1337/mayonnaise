@@ -133,6 +133,10 @@ void main() {
         vec3 tinted = bg * (1.0 - v_color.a) + v_color.rgb;  // tint is premultiplied
         tinted += (hash(floor(v_pixel)) - 0.5) * v_params.w;
         color = vec4(tinted, 1.0);
+        if (v_params.y > 0.0) {
+            float fy = (p.y + v_shape.w) / (2.0 * v_shape.w);
+            alpha *= 1.0 - smoothstep(1.0 - v_params.y, 1.0, fy);
+        }
     } else if (type == kArc) {
         float d = sdArc(p, v_shape.z, v_gradient.x, v_gradient.y) - v_params.y;
         alpha = coverage(d);

@@ -61,6 +61,7 @@ struct Window::Impl final : WidgetHost {
     void setClipboardText(const std::string& text) override;
     void setTextInput(bool active, Rect caret) override;
     [[nodiscard]] Size windowSize() const override { return platformWindow->sizeInPoints(); }
+    [[nodiscard]] float titleBarHeight() const override;
 };
 
 }  // namespace mayo

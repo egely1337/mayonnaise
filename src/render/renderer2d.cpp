@@ -311,6 +311,7 @@ void Renderer2D::backdrop(const Rect& rect, const CornerRadii& radii, const Mate
     in.color[1] = tint.g * tint.a;
     in.color[2] = tint.b * tint.a;
     in.color[3] = tint.a;
+    in.params[1] = style.fadeBottom;
     in.params[2] = style.saturation;
     in.params[3] = style.noise;
     // The blur chain is reused by the next material, so draw this one right away.

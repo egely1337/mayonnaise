@@ -47,6 +47,7 @@ struct MaterialStyle {
     float noise = 0.015f;      ///< subtle grain so large glass areas don't band
     Color highlight;           ///< specular rim along the top edge
     Color border;              ///< hairline around the shape
+    float fadeBottom = 0;      ///< fraction of the height over which the material fades out at the bottom
 };
 
 struct ThemeColors {

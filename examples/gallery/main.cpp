@@ -23,6 +23,18 @@ int main() {
     auto& window = app.createWindow({.title = "Gallery", .width = 980, .height = 720});
 
     auto status = Label("Ready").secondary();
+
+    window.setToolbar(Toolbar({
+        Spacer(),
+        ToolbarGroup({
+            Button(Icon::ChevronLeft).style(ButtonStyle::Borderless).tooltip("Back"),
+            Button(Icon::ChevronRight).style(ButtonStyle::Borderless).tooltip("Forward"),
+        }),
+        ToolbarGroup({
+            Button(Icon::Share).style(ButtonStyle::Borderless).tooltip("Share"),
+            Button(Icon::Trash).style(ButtonStyle::Borderless).tooltip("Delete"),
+        }),
+    }));
     auto sliderValue = Label("50%").secondary().font(TextStyle::Callout);
 
     window.setContent(

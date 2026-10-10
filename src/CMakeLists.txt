@@ -22,6 +22,7 @@ add_library(mayonnaise
   widgets/label.cpp
   widgets/slider.cpp
   widgets/toggle.cpp
+  widgets/toolbar.cpp
 )
 add_library(mayonnaise::mayonnaise ALIAS mayonnaise)
 

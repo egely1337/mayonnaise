@@ -58,6 +58,7 @@ MaterialStyle Theme::material(Material m) const {
             s.blurRadius = 20;
             s.tint = dark ? Color::rgb8(34, 34, 36, 0.72f) : Color::rgb8(250, 250, 252, 0.72f);
             s.highlight = Color::transparent();
+            s.border = Color::transparent();
             break;
         case Material::Popover:
             s.blurRadius = 30;

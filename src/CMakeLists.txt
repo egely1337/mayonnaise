@@ -1,8 +1,13 @@
 add_library(mayonnaise
+  core/animation.cpp
   core/app.cpp
   core/color.cpp
+  core/event_dispatcher.cpp
+  core/layout.cpp
   core/test_scene.cpp
+  core/widget.cpp
   core/window.cpp
+  core/window_root.cpp
   platform/sdl_platform.cpp
   render/gl.cpp
   render/font.cpp

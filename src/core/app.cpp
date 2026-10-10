@@ -27,7 +27,7 @@ App::Impl::~Impl() = default;
 
 void App::Impl::rebuildTheme() {
     theme = Theme::make(appearance, accent);
-    for (auto& w : windows) w->impl().needsFrame = true;
+    for (auto& w : windows) w->impl().themeChanged();
 }
 
 void App::Impl::dispatch(const platform::PlatformEvent& event) {

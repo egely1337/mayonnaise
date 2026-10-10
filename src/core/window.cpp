@@ -1,47 +1,270 @@
-#include "window_impl.hpp"
-
+#include <algorithm>
 #include <cstdlib>
+#include <string>
 
+#include "../render/font.hpp"
 #include "../render/gl.hpp"
 #include "../render/renderer2d.hpp"
 #include "app_impl.hpp"
 #include "mayonnaise/app.hpp"
 #include "mayonnaise/painter.hpp"
-#include <string>
+#include "window_impl.hpp"
+#include "window_root.hpp"
 
 namespace mayo {
 
 void drawRendererTestScene(render::Renderer2D& r, Size size, const Theme& theme);
 void drawTextTestScene(Painter& p, Size size, const Theme& theme);
 
+namespace {
+constexpr double kTooltipDelay = 0.9;
+constexpr float kResizeBorder = 6.0f;
+// Wheel notches and touchpad units to points (tuned to feel like macOS on libinput devices).
+constexpr float kWheelStep = 40.0f;
+constexpr float kPreciseStep = 14.0f;
+}  // namespace
+
+// --- Window (public) ---------------------------------------------------------------------------
+
 Window::Window(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) { m_impl->self = this; }
 Window::~Window() = default;
+
+void Window::setContent(const Element& content) {
+    m_impl->root->setContent(content.widget());
+    m_impl->requestLayout();
+}
 
 void Window::setTitle(const std::string& title) {
     m_impl->title = title;
     m_impl->platformWindow->setTitle(title);
-    m_impl->needsFrame = true;
+    m_impl->root->setTitle(title);
 }
 const std::string& Window::title() const { return m_impl->title; }
 Size Window::size() const { return m_impl->platformWindow->sizeInPoints(); }
 void Window::close() { m_impl->closed = true; }
 
+// --- Impl ---------------------------------------------------------------------------------------
+
 Window::Impl::Impl(const platform::WindowConfig& config)
-    : platformWindow(std::make_unique<platform::PlatformWindow>(config)), title(config.title) {}
+    : platformWindow(std::make_unique<platform::PlatformWindow>(config)),
+      root(std::make_shared<WindowRootView>()),
+      title(config.title) {
+    root->setHost(this);
+    root->setTitle(title);
+    root->onClose = [this] { closed = true; };
+    root->onMinimize = [this] { platformWindow->minimize(); };
+    root->onZoom = [this] { platformWindow->toggleMaximize(); };
+    dispatcher.setRoot(root);
+    dispatcher.onOverlayDismissed = [](Widget* overlay) {
+        if (auto* popup = dynamic_cast<PopupHost*>(overlay)) popup->popupDismissed();
+    };
+    platformWindow->setHitTest([this](Point p) { return hitRegion(p); });
+}
+
+Window::Impl::~Impl() {
+    platformWindow->setHitTest(nullptr);
+    root->setHost(nullptr);
+}
+
+void Window::Impl::themeChanged() {
+    root->notifyThemeChanged();
+    for (auto& o : dispatcher.overlays()) o->notifyThemeChanged();
+    requestLayout();
+}
+
+double Window::Impl::nextDeadline() const {
+    if (needsFrame) return 0.0;
+    return wakeAt;
+}
+
+void Window::Impl::scheduleFrame(double t) {
+    if (wakeAt < 0 || t < wakeAt) wakeAt = t;
+}
+
+void Window::Impl::setCursor(CursorShape shape) { platform::Platform::setCursor(shape); }
+
+void Window::Impl::showOverlay(std::shared_ptr<Widget> overlay) {
+    overlay->setHost(this);
+    dispatcher.pushOverlay(std::move(overlay));
+    requestLayout();
+}
+
+void Window::Impl::dismissOverlay(Widget* overlay) {
+    dispatcher.removeOverlay(overlay);
+    requestRedraw();
+}
+
+std::string Window::Impl::clipboardText() const { return platform::Platform::clipboardText(); }
+void Window::Impl::setClipboardText(const std::string& text) { platform::Platform::setClipboardText(text); }
+void Window::Impl::setTextInput(bool active, Rect caret) { platformWindow->setTextInputActive(active, caret); }
+
+void Window::Impl::updateCursor() { platform::Platform::setCursor(dispatcher.cursor()); }
+
+platform::HitRegion Window::Impl::hitRegion(Point p) {
+    using platform::HitRegion;
+    Size s = platformWindow->sizeInPoints();
+    if (!platformWindow->isMaximized() && !platformWindow->isFullscreen()) {
+        const float b = kResizeBorder;
+        bool left = p.x < b;
+        bool right = p.x >= s.width - b;
+        bool top = p.y < b;
+        bool bottom = p.y >= s.height - b;
+        if (top && left) return HitRegion::ResizeTopLeft;
+        if (top && right) return HitRegion::ResizeTopRight;
+        if (bottom && left) return HitRegion::ResizeBottomLeft;
+        if (bottom && right) return HitRegion::ResizeBottomRight;
+        if (left) return HitRegion::ResizeLeft;
+        if (right) return HitRegion::ResizeRight;
+        if (top) return HitRegion::ResizeTop;
+        if (bottom) return HitRegion::ResizeBottom;
+    }
+    if (!dispatcher.overlays().empty()) return HitRegion::Normal;
+    for (Widget* w = dispatcher.hitTest(p); w; w = w->parent()) {
+        if (w->isInteractive()) return HitRegion::Normal;
+        if (w->isDragRegion()) return HitRegion::Draggable;
+    }
+    return HitRegion::Normal;
+}
 
 void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
     using platform::EventType;
+    auto hideTooltip = [&] {
+        if (!tooltipWidget.expired()) requestRedraw();
+        tooltipWidget.reset();
+    };
     switch (event.type) {
         case EventType::WindowClose: closed = true; break;
         case EventType::WindowResized:
-        case EventType::WindowExposed:
-        case EventType::WindowScaleChanged: needsFrame = true; break;
+        case EventType::WindowScaleChanged:
+        case EventType::WindowMaximized:
+        case EventType::WindowRestored: requestLayout(); break;
+        case EventType::WindowExposed: requestRedraw(); break;
+        case EventType::WindowFocusGained:
+            keyWindow = true;
+            root->notifyThemeChanged();  // key-state colours (traffic lights, selection) change
+            requestLayout();
+            break;
+        case EventType::WindowFocusLost:
+            keyWindow = false;
+            root->notifyThemeChanged();
+            requestLayout();
+            hideTooltip();
+            break;
+        case EventType::MouseMove: {
+            pointer = event.position;
+            PointerEvent e{event.position, MouseButton::None, 0, event.modifiers};
+            dispatcher.pointerMove(e);
+            Widget* h = dispatcher.hovered();
+            // Find the nearest widget with a tooltip on the hover path.
+            Widget* tip = nullptr;
+            for (Widget* w = h; w; w = w->parent()) {
+                if (!w->tooltip().empty()) {
+                    tip = w;
+                    break;
+                }
+            }
+            if (tip != tooltipWidget.lock().get()) {
+                hideTooltip();
+                if (tip) {
+                    tooltipWidget = tip->weak_from_this();
+                    tooltipSince = platform::Platform::now();
+                    scheduleFrame(tooltipSince + kTooltipDelay);
+                }
+            }
+            updateCursor();
+            break;
+        }
+        case EventType::MouseDown: {
+            hideTooltip();
+            tooltipWidget.reset();
+            PointerEvent e{event.position, event.button, event.clicks, event.modifiers};
+            dispatcher.pointerDown(e);
+            updateCursor();
+            break;
+        }
+        case EventType::MouseUp: {
+            PointerEvent e{event.position, event.button, event.clicks, event.modifiers};
+            dispatcher.pointerUp(e);
+            updateCursor();
+            break;
+        }
+        case EventType::MouseLeave:
+            dispatcher.pointerLeave();
+            hideTooltip();
+            break;
+        case EventType::Scroll: {
+            hideTooltip();
+            ScrollEvent e;
+            e.position = event.position;
+            e.precise = event.precise;
+            e.delta = event.delta * (event.precise ? kPreciseStep : kWheelStep);
+            e.modifiers = event.modifiers;
+            // Shift+wheel scrolls horizontally, as on macOS.
+            if (!event.precise && hasModifier(event.modifiers, Modifiers::Shift) && e.delta.x == 0) {
+                e.delta = {e.delta.y, 0};
+            }
+            dispatcher.scroll(e);
+            updateCursor();
+            break;
+        }
+        case EventType::KeyDown: {
+            hideTooltip();
+            KeyEvent e{event.key, event.modifiers, event.repeat};
+            if (e.primary() && e.key == Key::W) {
+                closed = true;
+                break;
+            }
+            dispatcher.keyDown(e);
+            break;
+        }
+        case EventType::TextInput: dispatcher.textInput(TextInputEvent{event.text}); break;
         default: break;
     }
 }
 
+void Window::Impl::layout() {
+    needsLayout = false;
+    Size size = platformWindow->sizeInPoints();
+    root->setWindowState(platformWindow->isMaximized() || platformWindow->isFullscreen(), keyWindow,
+                         platformWindow->isTransparent());
+    root->measure(size);
+    root->arrange({0, 0, size.width, size.height});
+    for (auto& overlay : dispatcher.overlays()) {
+        Size m = overlay->measure(size);
+        Rect placed{(size.width - m.width) * 0.5f, (size.height - m.height) * 0.5f, m.width, m.height};
+        if (auto* popup = dynamic_cast<PopupHost*>(overlay.get())) placed = popup->placePopup(size, m);
+        overlay->arrange(placed);
+    }
+    dispatcher.refreshHover();
+}
+
+void Window::Impl::drawTooltip(Painter& p) {
+    auto w = tooltipWidget.lock();
+    if (!w || w->tooltip().empty() || !w->host()) return;
+    double elapsed = frameTime - tooltipSince;
+    if (elapsed < kTooltipDelay) return;
+    const Theme& t = theme();
+    Font font = t.font(TextStyle::Subheadline);
+    float tw = p.measureText(w->tooltip(), font);
+    Size win = platformWindow->sizeInPoints();
+    Rect r{pointer.x, pointer.y + 22, tw + 16, font.lineHeight + 8};
+    r.x = std::clamp(r.x, 4.0f, std::max(4.0f, win.width - r.width - 4));
+    if (r.bottom() > win.height - 4) r.y = pointer.y - r.height - 6;
+    float fade = std::clamp(static_cast<float>((elapsed - kTooltipDelay) / 0.12), 0.0f, 1.0f);
+    if (fade < 1.0f) requestRedraw();
+    p.pushOpacity(fade);
+    p.drawShadow(r, 6, t.colors.shadow.multipliedAlpha(0.6f), 10, {0, 3});
+    p.drawMaterial(r, 6, Material::Popover);
+    p.drawText(w->tooltip(), r.inset(8, 0), font, t.colors.label);
+    p.popOpacity();
+}
+
 void Window::Impl::render() {
     needsFrame = false;
+    wakeAt = -1;
+    frameTime = platform::Platform::now();
+    if (needsLayout) layout();
+
     platformWindow->makeCurrent();
     int w = 0;
     int h = 0;
@@ -49,26 +272,21 @@ void Window::Impl::render() {
     auto& app = App::current();
     const Theme& theme = app.theme();
     auto& r = *app.impl().renderer;
-    const float scale = static_cast<float>(w) / std::max(1.0f, platformWindow->sizeInPoints().width);
-    r.beginFrame(w, h, scale);
-
     Size size = platformWindow->sizeInPoints();
-    const bool rounded = platformWindow->isTransparent() && !platformWindow->isMaximized() &&
-                         !platformWindow->isFullscreen();
-    const float radius = rounded ? theme.metrics.windowRadius : 0.0f;
-    Rect bounds{0, 0, size.width, size.height};
-    r.fillRoundedRect(bounds, radius, theme.colors.windowBackground);
-    r.pushClip(bounds, radius);
+    const float scale = static_cast<float>(w) / std::max(1.0f, size.width);
+    r.beginFrame(w, h, scale);
     Painter painter(r, *app.impl().text);
+
     static const std::string testScene = std::getenv("MAYO_TEST_SCENE") ? std::getenv("MAYO_TEST_SCENE") : "";
-    if (testScene == "text") drawTextTestScene(painter, size, theme);
-    else if (!testScene.empty()) drawRendererTestScene(r, size, theme);
-    r.popClip();
-    // Hairline border + inner highlight, like a macOS window edge.
-    if (rounded) {
-        r.strokeRoundedRect(bounds, radius, theme.colors.windowBorder, 1.0f / scale);
-        r.strokeRoundedRect(bounds.inset(1.0f / scale), radius - 1.0f / scale, theme.colors.windowHighlight,
-                            1.0f / scale);
+    if (testScene == "text") {
+        drawTextTestScene(painter, size, theme);
+    } else if (!testScene.empty()) {
+        drawRendererTestScene(r, size, theme);
+    } else {
+        root->paint(painter);
+        for (auto& overlay : dispatcher.overlays()) overlay->paint(painter);
+        drawTooltip(painter);
+        root->paintWindowFrame(painter);
     }
     r.endFrame();
     platformWindow->swapBuffers();

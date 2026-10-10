@@ -1,0 +1,202 @@
+#include "window_root.hpp"
+
+#include <algorithm>
+
+#include "mayonnaise/app.hpp"
+#include "mayonnaise/painter.hpp"
+
+namespace mayo {
+
+namespace {
+
+/// Close / minimize / zoom. One widget so hovering anywhere over the group reveals all glyphs.
+class TrafficLightsView final : public Widget {
+public:
+    std::function<void()> onClose, onMinimize, onZoom;
+    bool key = true;
+
+    Size measureContent(Size /*available*/) override {
+        const auto& m = theme().metrics;
+        return {m.trafficLightSize * 3 + m.trafficLightSpacing * 2, m.trafficLightSize};
+    }
+    [[nodiscard]] bool isInteractive() const override { return true; }
+
+    [[nodiscard]] Rect light(int i) const {
+        const auto& m = theme().metrics;
+        Rect f = frame();
+        return {f.x + static_cast<float>(i) * (m.trafficLightSize + m.trafficLightSpacing),
+                f.center().y - m.trafficLightSize * 0.5f, m.trafficLightSize, m.trafficLightSize};
+    }
+    [[nodiscard]] int lightAt(Point p) const {
+        for (int i = 0; i < 3; ++i) {
+            if (light(i).outset(2).contains(p)) return i;
+        }
+        return -1;
+    }
+
+    bool onPointerDown(const PointerEvent& e) override {
+        if (e.button != MouseButton::Left) return false;
+        m_pressedLight = lightAt(e.position);
+        return m_pressedLight >= 0;
+    }
+    void onPointerMove(const PointerEvent& e) override {
+        int over = lightAt(e.position);
+        if (over != m_overLight) {
+            m_overLight = over;
+            invalidate();
+        }
+    }
+    void onPointerUp(const PointerEvent& e) override {
+        int which = m_pressedLight;
+        m_pressedLight = -1;
+        invalidate();
+        if (which < 0 || lightAt(e.position) != which) return;
+        if (which == 0 && onClose) onClose();
+        if (which == 1 && onMinimize) onMinimize();
+        if (which == 2 && onZoom) onZoom();
+    }
+    void onHoverChanged(bool /*hovered*/) override { m_overLight = -1; }
+
+    void draw(Painter& p) override {
+        const Theme& t = theme();
+        const bool dark = t.isDark();
+        static constexpr Color kFill[3] = {Color::hex(0xFF5F57), Color::hex(0xFEBC2E), Color::hex(0x28C840)};
+        static constexpr Color kGlyph[3] = {Color::hex(0x4D0000, 0.75f), Color::hex(0x995700, 0.8f),
+                                            Color::hex(0x006500, 0.8f)};
+        const bool showGlyphs = isHovered();
+        for (int i = 0; i < 3; ++i) {
+            Rect r = light(i);
+            Color fill = key || showGlyphs ? kFill[i] : (dark ? Color::white(0.18f) : Color::black(0.12f));
+            if (isPressed() && m_pressedLight == i && m_overLight == i) fill = fill.lighter(-0.2f);
+            p.fillRoundedRect(r, r.width * 0.5f, fill, Color::black(dark ? 0.2f : 0.1f), 0.5f);
+            if (!showGlyphs) continue;
+            const Point c = r.center();
+            const float k = r.width * 0.22f;
+            const float w = 1.1f;
+            if (i == 0) {
+                p.drawLine({c.x - k, c.y - k}, {c.x + k, c.y + k}, kGlyph[i], w);
+                p.drawLine({c.x - k, c.y + k}, {c.x + k, c.y - k}, kGlyph[i], w);
+            } else if (i == 1) {
+                p.drawLine({c.x - k * 1.25f, c.y}, {c.x + k * 1.25f, c.y}, kGlyph[i], w * 1.1f);
+            } else {
+                p.drawLine({c.x - k * 1.25f, c.y}, {c.x + k * 1.25f, c.y}, kGlyph[i], w * 1.1f);
+                p.drawLine({c.x, c.y - k * 1.25f}, {c.x, c.y + k * 1.25f}, kGlyph[i], w * 1.1f);
+            }
+        }
+    }
+
+private:
+    int m_pressedLight = -1;
+    int m_overLight = -1;
+};
+
+}  // namespace
+
+/// Title bar strip: draggable, centred title, traffic lights on the left.
+class TitleBarView final : public Widget {
+public:
+    TitleBarView() : m_lights(std::make_shared<TrafficLightsView>()) {
+        setDragRegion(true);
+        addChild(m_lights);
+    }
+    std::string title;
+    bool key = true;
+    std::shared_ptr<TrafficLightsView> m_lights;
+
+    Size measureContent(Size available) override {
+        m_lights->measure(available);
+        return {available.width, 32};
+    }
+    void arrangeContent(const Rect& content) override {
+        const auto& m = theme().metrics;
+        Size s = m_lights->measure(content.size());
+        m_lights->arrange({content.x + m.trafficLightInset - m.trafficLightSize * 0.5f + 2,
+                           content.center().y - s.height * 0.5f, s.width, s.height});
+    }
+    void draw(Painter& p) override {
+        const Theme& t = theme();
+        if (!title.empty()) {
+            Font f = t.font(TextStyle::Headline);
+            Color c = key ? t.colors.label : t.colors.tertiaryLabel;
+            Rect r = frame();
+            float left = m_lights->frame().right() + 12;
+            float w = p.measureText(title, f);
+            float x = std::max(left, r.center().x - w * 0.5f);
+            p.pushClip({left, r.y, std::max(0.0f, r.right() - left - 12), r.height});
+            p.drawText(title, {x, r.y, w, r.height}, f, c);
+            p.popClip();
+        }
+        paintChildren(p);
+    }
+};
+
+WindowRootView::WindowRootView() : m_titleBar(std::make_shared<TitleBarView>()) {
+    addChild(m_titleBar);
+    m_titleBar->m_lights->onClose = [this] {
+        if (onClose) onClose();
+    };
+    m_titleBar->m_lights->onMinimize = [this] {
+        if (onMinimize) onMinimize();
+    };
+    m_titleBar->m_lights->onZoom = [this] {
+        if (onZoom) onZoom();
+    };
+}
+
+void WindowRootView::setContent(std::shared_ptr<Widget> content) {
+    if (m_content) removeChild(m_content.get());
+    m_content = std::move(content);
+    // Content goes below the title bar in z-order so the traffic lights stay clickable.
+    if (m_content) insertChild(0, m_content);
+}
+
+void WindowRootView::setTitle(const std::string& title) {
+    m_titleBar->title = title;
+    invalidate();
+}
+
+void WindowRootView::setWindowState(bool maximized, bool key, bool transparent) {
+    m_maximized = maximized;
+    m_key = key;
+    m_transparent = transparent;
+    m_titleBar->key = key;
+    m_titleBar->m_lights->key = key;
+}
+
+float WindowRootView::windowRadius() const {
+    return m_transparent && !m_maximized ? theme().metrics.windowRadius : 0.0f;
+}
+
+Size WindowRootView::measureContent(Size available) {
+    m_titleBar->measure(available);
+    if (m_content) m_content->measure({available.width, std::max(0.0f, available.height - 32)});
+    return available;
+}
+
+void WindowRootView::arrangeContent(const Rect& content) {
+    const float barH = 32;
+    m_titleBar->arrange({content.x, content.y, content.width, barH});
+    if (m_content) m_content->arrange({content.x, content.y + barH, content.width, content.height - barH});
+}
+
+void WindowRootView::draw(Painter& p) {
+    const Theme& t = theme();
+    const float radius = windowRadius();
+    Rect bounds = frame();
+    p.fillRoundedRect(bounds, radius, t.colors.windowBackground);
+    p.pushClip(bounds, radius);
+    paintChildren(p);
+    p.popClip();
+}
+
+void WindowRootView::paintWindowFrame(Painter& p) {
+    const float radius = windowRadius();
+    if (radius <= 0) return;
+    const Theme& t = theme();
+    const float px = 1.0f / p.scale();
+    Rect bounds = frame();
+    p.strokeRoundedRect(bounds, radius, t.colors.windowBorder, px);
+    p.strokeRoundedRect(bounds.inset(px), radius - px, t.colors.windowHighlight, px);
+}
+
+}  // namespace mayo

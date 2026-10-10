@@ -1,0 +1,15 @@
+Checks: >
+  -*,
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  readability-braces-around-statements,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-use-nodiscard,
+  -readability-braces-around-statements
+WarningsAsErrors: ''
+HeaderFilterRegex: '(include/mayonnaise|src)/.*'
+FormatStyle: file

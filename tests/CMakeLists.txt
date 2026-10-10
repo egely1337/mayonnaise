@@ -1,0 +1,6 @@
+add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp)
+target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest)
+target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+mayonnaise_set_warnings(mayonnaise_tests)
+mayonnaise_set_sanitizers(mayonnaise_tests)
+add_test(NAME mayonnaise_tests COMMAND mayonnaise_tests)

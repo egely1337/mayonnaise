@@ -16,6 +16,12 @@ add_library(mayonnaise
   render/renderer2d.cpp
   render/text_system.cpp
   theme/theme.cpp
+  widgets/button.cpp
+  widgets/control.cpp
+  widgets/icons.cpp
+  widgets/label.cpp
+  widgets/slider.cpp
+  widgets/toggle.cpp
 )
 add_library(mayonnaise::mayonnaise ALIAS mayonnaise)
 

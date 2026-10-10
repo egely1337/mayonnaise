@@ -6,3 +6,4 @@ function(mayonnaise_example name)
 endfunction()
 
 add_subdirectory(hello)
+add_subdirectory(gallery)

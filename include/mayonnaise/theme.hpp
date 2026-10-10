@@ -123,7 +123,7 @@ struct ThemeMetrics {
     float spacing = 12;
     float spacingLarge = 20;
 
-    float toggleWidth = 38;
+    float toggleWidth = 40;
     float toggleHeight = 22;
     float checkboxSize = 15;
     float sliderTrackHeight = 4;

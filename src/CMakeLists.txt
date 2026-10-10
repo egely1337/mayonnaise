@@ -23,9 +23,13 @@ add_library(mayonnaise
   widgets/label.cpp
   widgets/menu.cpp
   widgets/popup.cpp
+  widgets/progress_bar.cpp
+  widgets/scroll_view.cpp
+  widgets/segmented_control.cpp
   widgets/sidebar.cpp
   widgets/slider.cpp
   widgets/split_view.cpp
+  widgets/text_field.cpp
   widgets/toggle.cpp
   widgets/toolbar.cpp
 )

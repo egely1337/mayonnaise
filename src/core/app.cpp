@@ -112,7 +112,14 @@ App::~App() {
 }
 
 App& App::current() { return *g_app; }
-const Theme& theme() { return App::current().theme(); }
+const Theme& theme() {
+    // Without an App (headless tests, measuring before startup) fall back to the default theme.
+    if (!g_app) {
+        static const Theme fallback = Theme::make(Appearance::Light);
+        return fallback;
+    }
+    return g_app->theme();
+}
 
 Window& App::createWindow(const WindowOptions& options) {
     platform::WindowConfig config;

@@ -4,6 +4,7 @@
 
 #include "mayonnaise/app.hpp"
 #include "mayonnaise/painter.hpp"
+#include "mayonnaise/widgets/scroll_view.hpp"
 
 namespace mayo {
 
@@ -101,7 +102,12 @@ void SplitViewView::arrangeContent(const Rect& content) {
     }
     const float barH = host() ? host()->titleBarHeight() : 0.0f;
     const float detailX = panel.right() + inset * 0.5f;
-    Rect detail = Rect::fromLTRB(std::max(content.x, detailX), content.y + barH, content.right(), content.bottom());
+    // A scrolling detail runs under the toolbar (its content starts below it) so the title bar's
+    // scroll-edge glass has something to blur; other content simply starts below the bar.
+    auto* scroller = dynamic_cast<ScrollViewView*>(m_detail.get());
+    if (scroller) scroller->setContentInsetTop(barH);
+    Rect detail = Rect::fromLTRB(std::max(content.x, detailX), content.y + (scroller ? 0.0f : barH), content.right(),
+                                 content.bottom());
     if (m_detail) {
         m_detail->measure(detail.size());
         m_detail->arrange(detail);

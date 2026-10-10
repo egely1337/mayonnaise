@@ -2,6 +2,8 @@
 #include <mayonnaise/mayonnaise.hpp>
 
 #include <array>
+#include <cstdlib>
+#include <string>
 #include <map>
 
 using namespace mayo;
@@ -75,6 +77,13 @@ Element generalPage() {
                                    FormRow("Set time and date automatically", Toggle({}, true)),
                                    FormRow("24-hour time", Toggle(), "Show the time as 13:00 instead of 1:00 PM"),
                                }),
+                   FormSection("Startup",
+                               {
+                                   FormRow("Startup Disk", Label("Macintosh HD").secondary()),
+                                   FormRow("Time Machine", Button("Set Up…")),
+                                   FormRow("Transfer or Reset", Button(Icon::ChevronRight).style(ButtonStyle::Borderless)),
+                               },
+                               "Changes take effect the next time you restart."),
                }),
            })
         .spacing(20);
@@ -184,10 +193,11 @@ int main() {
         SidebarItem("users", Icon::Person, "Users & Groups").withTile(Color::hex(0x0088FF)),
         SidebarItem("keyboard", Icon::Keyboard, "Keyboard").withTile(Color::hex(0x8E8E93)),
     });
-    sidebar.selection("appearance");
+    sidebar.selection("appearance").header(SearchField());
 
     auto detail = VStack({appearancePage(app)}).padding(Insets(8, 28, 24, 28));
-    auto split = SplitView(sidebar, detail).sidebarWidth(230);
+    auto scroller = ScrollView(detail);
+    auto split = SplitView(sidebar, scroller).sidebarWidth(230);
 
     sidebar.onSelect([&](const std::string& id) {
         detail.clear();
@@ -211,5 +221,11 @@ int main() {
         })}),
     }));
     window.setContent(split);
+
+    // MAYO_DEMO=scroll shows a long page scrolled under the toolbar (for screenshots).
+    if (const char* demo = std::getenv("MAYO_DEMO"); demo && std::string(demo) == "scroll") {
+        sidebar.select("general");
+        app.after(0.1, [&] { scroller.scrollTo({0, 150}, false); });
+    }
     return app.run();
 }

@@ -113,11 +113,11 @@ framebuffer → swap. If any animation is still running, another frame is schedu
 - [x] M4 Core — widget tree, measure/arrange stacks, event dispatcher (hover/capture/focus/Tab/overlays), Animated<T>
 - [x] M5 Basic widgets — Label, Button (5 styles), Toggle, Checkbox, Slider, Divider, vector icons
 - [x] M6 Window chrome — borderless transparent window, traffic lights, hit-test drag/resize, unified Toolbar
-- [ ] M7 Materials — translucent sidebar, popover/menu
-- [ ] M8 TextField, SegmentedControl, ProgressBar, ScrollView, SplitView
+- [x] M7 Materials — glass Sidebar in SplitView, Menu / Picker / Popover, Form cards, Canvas, App::after timers
+- [x] M8 TextField (+Search, secure), SegmentedControl, ProgressBar (+indeterminate, spinner), ScrollView (glide, momentum, rubber band, overlay bars)
 - [ ] M9 Polish
 
-Next: M7.
+Next: M9.
 
 ## Decisions
 

@@ -133,6 +133,7 @@ void main() {
         vec3 tinted = bg * (1.0 - v_color.a) + v_color.rgb;  // tint is premultiplied
         tinted += (hash(floor(v_pixel)) - 0.5) * v_params.w;
         color = vec4(tinted, 1.0);
+        alpha *= v_clip2.y;  // group opacity (fading popovers)
         if (v_params.y > 0.0) {
             float fy = (p.y + v_shape.w) / (2.0 * v_shape.w);
             alpha *= 1.0 - smoothstep(1.0 - v_params.y, 1.0, fy);

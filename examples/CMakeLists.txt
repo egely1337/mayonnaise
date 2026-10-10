@@ -7,3 +7,4 @@ endfunction()
 
 add_subdirectory(hello)
 add_subdirectory(gallery)
+add_subdirectory(settings_app)

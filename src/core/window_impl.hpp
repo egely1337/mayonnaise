@@ -24,6 +24,7 @@ struct Window::Impl final : WidgetHost {
     bool closed = false;
     bool keyWindow = true;
     double frameTime = 0;
+    bool inFrame = false;
     double wakeAt = -1;
 
     // Tooltip tracking.
@@ -48,7 +49,9 @@ struct Window::Impl final : WidgetHost {
         needsLayout = true;
         needsFrame = true;
     }
-    [[nodiscard]] double time() const override { return frameTime; }
+    /// Frame time while rendering (so all animations agree); wall clock while handling events,
+    /// so animations started by input don't begin "in the past" after an idle period.
+    [[nodiscard]] double time() const override { return inFrame ? frameTime : platform::Platform::now(); }
     void scheduleFrame(double t) override;
     void setFocus(Widget* widget, bool visible) override { dispatcher.setFocus(widget, visible); }
     [[nodiscard]] Widget* focusedWidget() const override { return dispatcher.focused(); }

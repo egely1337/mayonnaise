@@ -34,7 +34,9 @@ MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery
 ```
 
 Useful environment variables:
-- `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` — save the first window after n frames and quit.
+- `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
+- `MAYO_DEMO=picker|menu|popover` (gallery only) — open a popup at startup for screenshots.
+- `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
 - `MAYO_SCALE=<float>` — override the UI scale factor (HiDPI testing).
 - `MAYO_NO_TRANSPARENCY=1` — opaque, square-cornered windows (X11 without compositor).

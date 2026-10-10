@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -33,6 +34,11 @@ public:
     /// Runs until the last window closes or quit() is called. Returns the process exit code.
     int run();
     void quit(int exitCode = 0);
+
+    /// Runs `fn` on the UI thread at the next loop iteration.
+    void post(std::function<void()> fn);
+    /// Runs `fn` on the UI thread after `seconds`.
+    void after(double seconds, std::function<void()> fn);
 
     void setAppearance(Appearance appearance);
     [[nodiscard]] Appearance appearance() const;

@@ -5,7 +5,7 @@
 #include <string>
 
 #include "mayonnaise/widget.hpp"
-#include "popup.hpp"
+#include "mayonnaise/popup.hpp"
 
 namespace mayo {
 

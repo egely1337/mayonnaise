@@ -18,6 +18,12 @@ struct App::Impl {
     Appearance appearance = Appearance::Light;
     Color accent = Theme::defaultAccent();
     bool running = false;
+    struct Timer {
+        double due;
+        std::function<void()> fn;
+    };
+    std::vector<Timer> timers;
+    void runDueTimers();
     std::unique_ptr<render::Renderer2D> renderer;  // shared by all windows (one GL context)
     std::unique_ptr<render::TextSystem> text;
     bool quitRequested = false;
@@ -29,6 +35,8 @@ struct App::Impl {
     std::string screenshotPath;
     int screenshotFrames = 0;
     int framesRendered = 0;
+    double screenshotDelay = 0.4;  // seconds; frames alone may finish before timers fire
+    double startTime = 0;
 
     Impl();
     ~Impl();

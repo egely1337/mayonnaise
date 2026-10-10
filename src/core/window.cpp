@@ -237,7 +237,10 @@ void Window::Impl::layout() {
     root->measure(size);
     root->arrange({0, 0, size.width, size.height});
     for (auto& overlay : dispatcher.overlays()) {
-        Size m = overlay->measure(size);
+        // Popups take their ideal size (expanding content must not stretch them to the window).
+        Size m = overlay->measure({kInfinity, kInfinity});
+        if (m.width > size.width - 16 || m.height > size.height - 16)
+            m = overlay->measure({std::min(m.width, size.width - 16), std::min(m.height, size.height - 16)});
         Rect placed{(size.width - m.width) * 0.5f, (size.height - m.height) * 0.5f, m.width, m.height};
         if (auto* popup = dynamic_cast<PopupHost*>(overlay.get())) placed = popup->placePopup(size, m);
         overlay->arrange(placed);
@@ -270,6 +273,7 @@ void Window::Impl::render() {
     needsFrame = false;
     wakeAt = -1;
     frameTime = platform::Platform::now();
+    inFrame = true;
     if (needsLayout) layout();
 
     platformWindow->makeCurrent();
@@ -296,6 +300,7 @@ void Window::Impl::render() {
         root->paintWindowFrame(painter);
     }
     r.endFrame();
+    inFrame = false;
     platformWindow->swapBuffers();
 }
 

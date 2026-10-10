@@ -18,9 +18,14 @@ add_library(mayonnaise
   theme/theme.cpp
   widgets/button.cpp
   widgets/control.cpp
+  widgets/form.cpp
   widgets/icons.cpp
   widgets/label.cpp
+  widgets/menu.cpp
+  widgets/popup.cpp
+  widgets/sidebar.cpp
   widgets/slider.cpp
+  widgets/split_view.cpp
   widgets/toggle.cpp
   widgets/toolbar.cpp
 )

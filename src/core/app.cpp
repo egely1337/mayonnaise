@@ -20,6 +20,7 @@ App::Impl::Impl() {
     if (const char* s = std::getenv("MAYO_SCREENSHOT")) screenshotPath = s;
     if (const char* f = std::getenv("MAYO_SCREENSHOT_FRAMES")) screenshotFrames = std::atoi(f);
     if (!screenshotPath.empty() && screenshotFrames <= 0) screenshotFrames = 5;
+    if (const char* d = std::getenv("MAYO_SCREENSHOT_DELAY")) screenshotDelay = std::atof(d);
     rebuildTheme();
 }
 
@@ -44,8 +45,22 @@ void App::Impl::dispatch(const platform::PlatformEvent& event) {
     }
 }
 
+void App::Impl::runDueTimers() {
+    double now = platform::Platform::now();
+    std::vector<std::function<void()>> due;
+    std::erase_if(timers, [&](Timer& t) {
+        if (t.due > now) return false;
+        due.push_back(std::move(t.fn));
+        return true;
+    });
+    for (auto& fn : due) fn();
+}
+
 double App::Impl::nextDeadline() const {
     double best = -1;
+    for (const auto& t : timers) {
+        if (best < 0 || t.due < best) best = t.due;
+    }
     for (const auto& w : windows) {
         double d = w->impl().nextDeadline();
         if (d >= 0 && (best < 0 || d < best)) best = d;
@@ -60,7 +75,7 @@ void App::Impl::renderDueWindows() {
         if (d >= 0 && d <= now + 0.001) w->impl().render();
     }
     if (!screenshotPath.empty() && !windows.empty()) {
-        if (++framesRendered >= screenshotFrames) {
+        if (++framesRendered >= screenshotFrames && platform::Platform::now() - startTime >= screenshotDelay) {
             int w = 0;
             int h = 0;
             auto pixels = renderer->readPixels(w, h);
@@ -126,6 +141,7 @@ Window& App::createWindow(const WindowOptions& options) {
 int App::run() {
     using platform::Platform;
     m_impl->running = true;
+    m_impl->startTime = Platform::now();
     // Render once before showing so the first visible frame isn't garbage.
     for (auto& w : m_impl->windows) {
         w->impl().render();
@@ -140,6 +156,7 @@ int App::run() {
             m_impl->dispatch(event);
             while (Platform::pollEvent(event)) m_impl->dispatch(event);
         }
+        m_impl->runDueTimers();
         m_impl->renderDueWindows();
         m_impl->reapClosedWindows();
     }
@@ -150,6 +167,13 @@ int App::run() {
 void App::quit(int exitCode) {
     m_impl->exitCode = exitCode;
     m_impl->quitRequested = true;
+    platform::Platform::wake();
+}
+
+void App::post(std::function<void()> fn) { after(0, std::move(fn)); }
+
+void App::after(double seconds, std::function<void()> fn) {
+    m_impl->timers.push_back({platform::Platform::now() + seconds, std::move(fn)});
     platform::Platform::wake();
 }
 

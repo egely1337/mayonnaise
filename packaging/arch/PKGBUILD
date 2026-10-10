@@ -18,14 +18,16 @@ pkgname=(mayonnaise-git
          mayo-photos-git
          mayo-video-player-git
          mayo-system-settings-git)
-pkgver=0.1.0.r23.adc141f
+pkgver=0.1.0.r25.e9d2874
 pkgrel=1
 pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3, and apps built with it'
 arch=(x86_64)
 url='https://github.com/egely1337/mayonnaise'
 license=(LicenseRef-custom OFL-1.1)
 makedepends=(git cmake pkgconf sdl3 freetype2 ffmpeg glib2 doctest)
-source=("mayonnaise::git+file://${startdir}/../..")
+# Pinned to master: without a branch, makepkg keeps following whatever branch was checked out when it
+# first cloned, and rebuilds that old commit forever.
+source=("mayonnaise::git+file://${startdir}/../..#branch=master")
 sha256sums=(SKIP)
 
 pkgver() {

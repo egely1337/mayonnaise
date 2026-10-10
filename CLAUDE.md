@@ -29,6 +29,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/photos/photos <images or folders...>
 ./build/examples/video_player/video_player <media files...>   # only built when FFmpeg dev libs exist
 ./build/examples/task_manager/task_manager                    # Linux only
+./build/examples/finder/finder [folder]                         # Linux only
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -41,7 +42,9 @@ Useful environment variables:
 - `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
 - `MAYO_DEMO=picker|menu|popover|<page>` (gallery) / `MAYO_DEMO=scroll` (settings_app) /
   `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) / `MAYO_DEMO=seek:<s>` (video_player) — drive the
-  examples at startup for screenshots.
+  examples at startup for screenshots. The finder takes comma-separated steps, including file operations
+  (`MAYO_DEMO="list,select:a.txt,duplicate:a.txt,wait:0.3,undo"`, full list in its main.cpp); point it at a
+  scratch folder, and it never launches other programs in demo mode.
 - `MAYO_VERBOSE=2` — also print frames per second (find widgets that never stop requesting frames).
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
@@ -49,6 +52,7 @@ Useful environment variables:
 - `MAYO_NO_TRANSPARENCY=1` — opaque, square-cornered windows (X11 without compositor).
 - `MAYO_VERBOSE=1` — print GL version/renderer and whether KHR_debug output is on.
 - `SDL_VIDEO_DRIVER=x11|wayland` — force SDL backend.
+- `MAYO_EGL_ALL_VENDORS=1` — load every glvnd EGL vendor (see the hybrid-GPU gotcha).
 
 CMake options: `MAYONNAISE_BUILD_EXAMPLES` (ON), `MAYONNAISE_BUILD_TESTS` (ON),
 `MAYONNAISE_USE_SYSTEM_DEPS` (OFF), `MAYONNAISE_SANITIZE` (OFF).
@@ -162,6 +166,10 @@ Known issues / next steps:
   Cheap (no stencil, no batch breaks) and correct for the UI case of rect clips nested in rounded panels.
 - **Overlays (menus, popovers) are measured at their ideal size** (`{inf, inf}`), then clamped to the window, so
   expanding content (spacers) doesn't stretch them to full width.
+- **Finder example** keeps all views on one shared `Browser` state (folder, entries, selection, hooks into
+  `main.cpp`); `FileView` holds the Finder selection rules, rubber band, type-select, inline rename and drag
+  and drop so the icon grid, list rows and browser columns only provide geometry. Column view nests vertical
+  ScrollViews in a horizontal one (scroll chaining handles the axes).
 - **Photos example** uses custom `Widget` subclasses (grid, viewer, page container) rather than new library
   widgets: it doubles as the reference for writing custom widgets. A custom detail container opts into
   running under the toolbar with `extendsIntoTitleBar()`.
@@ -169,6 +177,24 @@ Known issues / next steps:
   `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
 ## Gotchas
+
+- **Hybrid GPUs load every EGL vendor.** glvnd's libEGL maps the NVIDIA stack (~90 MB RSS, can wake the dGPU)
+  even when Mesa drives the display. `Platform::init` restricts EGL to Mesa on Wayland when all connected
+  screens hang off non-NVIDIA GPUs, and unsets the variable once the context exists so launched programs
+  don't inherit it. PRIME offload (`__NV_PRIME_RENDER_OFFLOAD`) and `MAYO_EGL_ALL_VENDORS=1` opt out.
+- **GPU memory on integrated GPUs is system RAM** (GTT, not in RSS: read `drm-resident-gtt` in
+  /proc/<pid>/fdinfo). Instances stream through a ring buffer (`Renderer2D::flush`); orphaning the whole
+  buffer on every batch made Mesa allocate and cache a buffer per batch (~20 MB more with many thumbnails).
+  The glyph atlas is cleared through an FBO instead of uploading zeros.
+- **ImageData drops its CPU pixels after upload** unless `setRetainPixels(true)`; `scaledToFit()` must run
+  before the first draw. Dynamic images (`create()`/`update()`) keep theirs.
+- **Idle heap trimming**: after 1 s of idleness following work, `App::run` calls `malloc_trim(0)` so memory
+  freed by decoder threads (glibc per-thread arenas) goes back to the OS.
+- **One FreeType face per (weight, optical size)**, resized on demand; a face per pixel size cost ~70 KB each.
+- **Finder file operations are real.** Test them in a scratch folder; items trashed on another file system
+  go to `$topdir/.Trash-$uid` (e.g. /tmp/.Trash-1000 for tmpfs), as the spec requires.
+- **Windows popped up by screenshot runs take keyboard focus**, so typing elsewhere during a run lands in the
+  app (type-to-select in the finder). Don't trust a surprising selection in a screenshot without a trace.
 
 - **Task manager sampling**: one pass over /proc takes ~10 ms for ~400 processes, done on a worker thread;
   the uid comes from stat()ing /proc/<pid> (cheaper than parsing status), names from argv[0] because comm is

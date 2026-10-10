@@ -66,6 +66,23 @@ background thread every 1–5 s (View menu); the app itself uses well under 1 % 
 Per-process network traffic isn't available on Linux without root/eBPF, so the Network tab lists open
 sockets per process; disk I/O per process is only readable for your own processes.
 
+### Finder example
+
+`examples/finder` is a file manager modelled on the macOS Finder: Icons, List (with disclosure triangles) and
+Columns views (Ctrl+1/2/3) with a preview pane, picture thumbnails and text "page" previews decoded in the
+background, Quick Look (Space), Get Info (Ctrl+I), inline rename (Enter), drag and drop between folders
+(hold Ctrl to copy), copy / cut / paste, Duplicate, Move to Trash with Put Back and Undo (Ctrl+Z), recursive
+search, Go to Folder (Ctrl+Shift+G), a path bar, Recents, and folders that update live (inotify). It uses
+the freedesktop.org Trash, so items trashed here show up in other file managers too.
+
+```sh
+./build/examples/finder/finder ~/Documents
+```
+
+| Icons | Columns (dark) |
+|---|---|
+| ![](docs/screenshots/finder.png) | ![](docs/screenshots/finder-columns-dark.png) |
+
 ## Hello World
 
 ```cpp

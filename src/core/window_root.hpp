@@ -20,6 +20,7 @@ public:
     void setContent(std::shared_ptr<Widget> content);
     void setToolbar(std::shared_ptr<Widget> toolbar);
     void setTitle(const std::string& title);
+    void setTitleVisible(bool visible);
     void setWindowState(bool maximized, bool key, bool transparent, bool fullscreen = false);
     void setChromeHidden(bool hidden);
     [[nodiscard]] float windowRadius() const;

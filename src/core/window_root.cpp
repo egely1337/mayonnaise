@@ -103,6 +103,7 @@ public:
         addChild(m_lights);
     }
     std::string title;
+    bool titleVisible = true;
     bool key = true;
     bool fullSize = false;
     float leadingEdge = 0;
@@ -138,13 +139,14 @@ public:
                            content.center().y - s.height * 0.5f, s.width, s.height});
         if (toolbar) {
             float x = titleStart();
-            if (!title.empty()) x += std::ceil(measureTitle()) + 20;
+            if (showsTitle()) x += std::ceil(measureTitle()) + 20;
             float right = content.right() - 12;
             toolbar->measure({std::max(0.0f, right - x), content.height});
             toolbar->arrange({x, content.y, std::max(0.0f, right - x), content.height});
         }
     }
     [[nodiscard]] float measureTitle() const;
+    [[nodiscard]] bool showsTitle() const { return titleVisible && !title.empty(); }
 
     void draw(Painter& p) override {
         const Theme& t = theme();
@@ -156,7 +158,7 @@ public:
             m.fadeBottom = 0.45f;
             p.drawMaterial({x, r.y, r.right() - x, r.height + 10}, {}, m);
         }
-        if (!title.empty()) {
+        if (showsTitle()) {
             Font f = titleFont();
             Color c = key ? t.colors.label : t.colors.tertiaryLabel;
             float w = p.measureText(title, f);
@@ -200,6 +202,11 @@ void WindowRootView::setToolbar(std::shared_ptr<Widget> toolbar) {
 
 void WindowRootView::setTitle(const std::string& title) {
     m_titleBar->title = title;
+    invalidateLayout();
+}
+
+void WindowRootView::setTitleVisible(bool visible) {
+    m_titleBar->titleVisible = visible;
     invalidateLayout();
 }
 

@@ -60,6 +60,7 @@ Size Window::size() const { return m_impl->platformWindow->sizeInPoints(); }
 void Window::close() { m_impl->closed = true; }
 void Window::setFullscreen(bool fullscreen) { m_impl->platformWindow->setFullscreen(fullscreen); }
 bool Window::isFullscreen() const { return m_impl->platformWindow->isFullscreen(); }
+void Window::setTitleVisible(bool visible) { m_impl->root->setTitleVisible(visible); }
 void Window::setChromeHidden(bool hidden) { m_impl->root->setChromeHidden(hidden); }
 
 // --- Impl ---------------------------------------------------------------------------------------

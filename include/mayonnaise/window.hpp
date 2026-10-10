@@ -27,6 +27,8 @@ public:
     /// Keys no widget handled (app-wide shortcuts). Return true if consumed.
     void onKey(std::function<bool(const KeyEvent&)> handler);
     void setTitle(const std::string& title);
+    /// Hide the title drawn in the title bar (the platform title is kept), for toolbars that show their own.
+    void setTitleVisible(bool visible);
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;
     void close();

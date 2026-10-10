@@ -374,6 +374,55 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.poly({{16, 11}, {16, 14}, {5, 14}});
             pen.poly({{7.5f, 11.5f}, {5, 14}, {7.5f, 16.5f}});
             break;
+        case Icon::ArrowDownCircle:
+            pen.circle(10, 10, 7.8f);
+            pen.line(10, 5.6f, 10, 14);
+            pen.poly({{6.6f, 10.8f}, {10, 14.2f}, {13.4f, 10.8f}});
+            break;
+        case Icon::MusicNote:
+            pen.line(7.6f, 14.5f, 7.6f, 4.8f);
+            pen.line(15.4f, 12.8f, 15.4f, 3.2f);
+            pen.p.drawLine(pen.at(7.6f, 4.6f), pen.at(15.4f, 3.0f), color, pen.w * 1.6f);
+            pen.dot(5.7f, 14.8f, 2.25f);
+            pen.dot(13.5f, 13.1f, 2.25f);
+            break;
+        case Icon::HardDrive:
+            pen.rrect(2.5f, 5.5f, 15, 9, 2.2f);
+            pen.line(2.5f, 10.8f, 17.5f, 10.8f);
+            pen.dot(14.6f, 12.7f, 0.9f);
+            break;
+        case Icon::Eject:
+            pen.poly({{10, 4}, {16, 11}, {4, 11}}, true);
+            pen.line(4, 15, 16, 15);
+            break;
+        case Icon::Columns:
+            pen.rrect(2.5f, 4, 15, 12, 2);
+            pen.line(7.5f, 4, 7.5f, 16);
+            pen.line(12.5f, 4, 12.5f, 16);
+            break;
+        case Icon::Tag:
+            pen.poly({{3, 4.5f}, {3, 10}, {10.5f, 17.5f}, {17.5f, 10.5f}, {10, 3}, {4.5f, 3}}, true);
+            pen.dot(6.8f, 6.8f, 1.2f);
+            break;
+        case Icon::DocOnDoc:
+            pen.poly({{3.5f, 13.5f}, {3.5f, 4.5f}, {5, 3}, {12.5f, 3}});
+            pen.rrect(6.5f, 6, 10, 11.5f, 1.8f);
+            break;
+        case Icon::FolderPlus:
+            pen.poly({{2.5f, 15.5f}, {2.5f, 5}, {7.5f, 5}, {9, 6.8f}, {17.5f, 6.8f}, {17.5f, 15.5f}}, true);
+            pen.line(10, 9.5f, 10, 13.5f);
+            pen.line(8, 11.5f, 12, 11.5f);
+            break;
+        case Icon::ArrowUpRight:
+            pen.rrect(2.5f, 2.5f, 15, 15, 3);
+            pen.line(7, 13, 13, 7);
+            pen.poly({{8.5f, 7}, {13, 7}, {13, 11.5f}});
+            break;
+        case Icon::Terminal:
+            pen.rrect(2.5f, 3.5f, 15, 13, 2.2f);
+            pen.poly({{5.5f, 8}, {8, 10}, {5.5f, 12}});
+            pen.line(9.5f, 12.5f, 13.5f, 12.5f);
+            break;
         case Icon::Pencil:
             pen.poly({{13.5f, 3}, {17, 6.5f}, {7, 16.5f}, {3, 17}, {3.5f, 13}}, true);
             pen.line(11.5f, 5, 15, 8.5f);

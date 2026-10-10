@@ -15,6 +15,7 @@ enum class Icon : std::uint16_t {
     Trash, Share, House, Clock, Hand, Keyboard, Photo, Square, Circle, Grid, List, Bolt,
     Cloud, Envelope, Calendar, Pencil, HeartFill, Import, ZoomIn, ZoomOut,
     Play, Pause, SkipBack, SkipForward, Backward, Forward, Expand, Contract, SpeakerSlash, Film, Repeat,
+    ArrowDownCircle, MusicNote, HardDrive, Eject, Columns, Tag, DocOnDoc, FolderPlus, ArrowUpRight, Terminal,
 };
 
 }  // namespace mayo

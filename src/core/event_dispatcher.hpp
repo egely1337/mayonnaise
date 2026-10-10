@@ -25,6 +25,8 @@ public:
     void pointerMove(const PointerEvent& e);
     void pointerDown(const PointerEvent& e);
     void pointerUp(const PointerEvent& e);
+    /// Ends a press without a release from the platform (the system took the pointer for a drag).
+    void cancelPointer();
     void pointerLeave();
     void scroll(const ScrollEvent& e);
     void magnify(const MagnifyEvent& e);

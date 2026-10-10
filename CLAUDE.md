@@ -327,6 +327,14 @@ Known issues / next steps:
   windows) N frames can finish before `App::after` timers fire.
 - **Backdrop materials ignore the colour opacity stack by construction** (they output the blurred scene), so
   group opacity is passed separately (`clip2.y`) — otherwise fading popovers pop in at full opacity.
+- **Dragging files out (Wayland)**: SDL3 can't start a drag, so `src/platform/wayland_drag.cpp` dlopen()s
+  libwayland-client and puts its own wl_seat / wl_pointer / wl_data_device on SDL's wl_display, on a separate
+  event queue dispatched after every SDL pump. The extra wl_pointer only exists to learn the serial of the button
+  press, which `start_drag` requires. Widgets call `host()->startFileDrag(paths)` while the button is down (Finder
+  does it when the pointer leaves the window); the compositor keeps the release, so a DragEnded platform event
+  makes the dispatcher send the captured widget an onPointerUp far outside the window. Not available on X11.
+- **Open in Terminal** passes the folder explicitly (`--working-directory` etc.): Ptyxis, Console and GNOME
+  Terminal are single-process, so a new window ignores the child's cwd. Mayo Terminal is tried first.
 - **Wheel vs touchpad**: SDL3 gives no device type. Deltas that aren't multiples of 1/120 notch are touchpad
   (1:1 + momentum); whole notches and high-resolution wheel fractions are a wheel (animated glide). A touchpad
   event can land on a whole value, so events within 250 ms of a touchpad event stay touchpad — per-event

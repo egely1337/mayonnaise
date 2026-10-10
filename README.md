@@ -114,7 +114,8 @@ All applications have a Settings window (Ctrl+,).
 Columns views (Ctrl+1/2/3) with a preview pane, picture thumbnails and text "page" previews decoded in the
 background, Quick Look (Space), Get Info (Ctrl+I), inline rename (Enter), drag and drop between folders
 (hold Ctrl to copy), copy / cut / paste, Duplicate, Move to Trash with Put Back and Undo (Ctrl+Z), recursive
-search, Go to Folder (Ctrl+Shift+G), a path bar, Recents, and folders that update live (inotify). It uses
+search, Go to Folder (Ctrl+Shift+G), a path bar, Recents, and folders that update live (inotify). Drag files
+out of the window to drop them on other apps (a browser upload, another file manager; Wayland). It uses
 the freedesktop.org Trash, so items trashed here show up in other file managers too.
 
 ```sh

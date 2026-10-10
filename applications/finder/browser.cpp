@@ -196,6 +196,7 @@ bool FileView::onPointerDown(const PointerEvent& e) {
     m_collapseOnUp = false;
     m_banding = false;
     m_dragging = false;
+    m_external = false;
     if (!ownsSelection()) {
         activate(item);
         if (auto* h = host()) h->setFocus(this, false);
@@ -274,6 +275,21 @@ void FileView::onPointerMove(const PointerEvent& e) {
         return;
     }
     if (m_dragging) {
+        if (m_external) return;
+        // Leaving the window hands the files to the system, so they can be dropped on other apps (a browser
+        // upload, an email, another file manager). Inside the window the drag stays ours.
+        const Size win = host() ? host()->windowSize() : Size{};
+        const bool outside = e.position.x < 0 || e.position.y < 0 || e.position.x >= win.width || e.position.y >= win.height;
+        if (outside && host() && host()->startFileDrag(m_dragPaths)) {
+            m_external = true;
+            m_browser->dropHover.clear();
+            if (m_ghost) {
+                host()->dismissOverlay(m_ghost.get());
+                m_ghost.reset();
+            }
+            invalidate();
+            return;
+        }
         if (auto* ghost = dynamic_cast<DragGhost*>(m_ghost.get())) ghost->copy = hasModifier(e.modifiers, Modifiers::Ctrl);
         updateDrag(e.position);
         return;
@@ -287,6 +303,13 @@ void FileView::onPointerMove(const PointerEvent& e) {
 }
 
 void FileView::onPointerUp(const PointerEvent& e) {
+    if (m_external) {
+        // The drop happened in another app (or was cancelled); nothing to do here.
+        m_external = false;
+        m_dragging = false;
+        m_collapseOnUp = false;
+        return;
+    }
     if (m_dragging) {
         endDrag(e.position, hasModifier(e.modifiers, Modifiers::Ctrl));
     } else if (m_collapseOnUp && !m_downItem.empty()) {

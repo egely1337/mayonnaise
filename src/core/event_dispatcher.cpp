@@ -135,6 +135,14 @@ void EventDispatcher::pointerDown(const PointerEvent& e) {
     }
 }
 
+void EventDispatcher::cancelPointer() {
+    if (auto c = lock(captured())) {
+        m_captured.reset();
+        c->setPressedState(false);
+        c->onPointerUp(PointerEvent{{-1e6f, -1e6f}, MouseButton::Left, 0, Modifiers::None});
+    }
+}
+
 void EventDispatcher::pointerUp(const PointerEvent& e) {
     m_lastPointer = e.position;
     if (auto c = lock(captured())) {

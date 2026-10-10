@@ -12,6 +12,7 @@ add_library(mayonnaise
   platform/portal.cpp
   platform/sdl_audio.cpp
   platform/sdl_platform.cpp
+  platform/wayland_drag.cpp
   render/gl.cpp
   render/font.cpp
   render/font_api.cpp

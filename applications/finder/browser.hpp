@@ -150,6 +150,7 @@ private:
     mayo::Rect m_band;
     std::set<std::string> m_bandBase;
     bool m_dragging = false;
+    bool m_external = false;  // the drag left the window and was handed to the system (other apps)
     std::vector<std::string> m_dragPaths;
     std::shared_ptr<mayo::Widget> m_ghost;
     // Type-to-select.

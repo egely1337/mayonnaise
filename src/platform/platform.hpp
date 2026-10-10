@@ -45,6 +45,7 @@ enum class EventType : std::uint8_t {
     Pinch,
     Wake,
     SystemThemeChanged,  // desktop switched between light and dark
+    DragEnded,           // a drag started with startFileDrag() was dropped or cancelled
 };
 
 struct PlatformEvent {
@@ -97,6 +98,9 @@ public:
 
     void setHitTest(std::function<HitRegion(Point)> callback);
     void setTextInputActive(bool active, Rect caretRect = {});
+    /// Drags files out to other apps (Wayland). Must be called while the pointer button that started the drag
+    /// is still down. A DragEnded event follows when it's over. False when the platform can't.
+    bool startFileDrag(const std::vector<std::string>& paths);
 
     /// Converts window coordinates reported by SDL into points.
     [[nodiscard]] float pointsPerWindowUnit() const;

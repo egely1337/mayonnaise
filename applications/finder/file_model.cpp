@@ -612,16 +612,34 @@ void emptyTrash() {
 void openWithDefaultApp(const std::string& path) { spawnDetached({"xdg-open", path}); }
 
 void openTerminal(const std::string& folder) {
-    if (const char* t = std::getenv("TERMINAL"); t && *t && onPath(t)) {
-        spawnDetached({t}, folder);
-        return;
+    // Our own Terminal first, like Finder opens Terminal.app. It ships next to us in /usr/bin; when running from
+    // a build tree, look for the sibling build directory.
+    std::error_code ec;
+    const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+    for (const fs::path& own : {self.parent_path() / "terminal", self.parent_path().parent_path() / "terminal" / "terminal"}) {
+        if (!ec && fs::exists(own, ec) && own != self) return spawnDetached({own.string(), folder}, folder);
     }
-    for (const char* t : {"kgx", "gnome-terminal", "konsole", "kitty", "alacritty", "foot", "wezterm", "ghostty",
-                          "xfce4-terminal", "xterm"}) {
-        if (onPath(t)) {
-            spawnDetached({t}, folder);
-            return;
-        }
+    if (onPath("terminal")) return spawnDetached({"terminal", folder}, folder);
+    if (const char* t = std::getenv("TERMINAL"); t && *t && onPath(t)) return spawnDetached({t}, folder);
+    // Most terminals run as a single process per user, so a new window starts in *that* process's directory
+    // unless it's passed explicitly; the working directory of the child alone isn't enough.
+    const std::vector<std::vector<std::string>> known = {
+        {"xdg-terminal-exec", "--dir=" + folder},
+        {"ptyxis", "--new-window", "--working-directory=" + folder},
+        {"kgx", "--working-directory=" + folder},
+        {"gnome-terminal", "--working-directory=" + folder},
+        {"konsole", "--workdir", folder},
+        {"kitty", "--directory", folder},
+        {"alacritty", "--working-directory", folder},
+        {"foot", "--working-directory=" + folder},
+        {"wezterm", "start", "--cwd", folder},
+        {"ghostty", "--working-directory=" + folder},
+        {"xfce4-terminal", "--working-directory=" + folder},
+        {"tilix", "--working-directory=" + folder},
+        {"xterm"},
+    };
+    for (const auto& cmd : known) {
+        if (onPath(cmd[0])) return spawnDetached(cmd, folder);
     }
 }
 

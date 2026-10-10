@@ -233,6 +233,11 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
             updateCursor();
             break;
         }
+        case EventType::DragEnded:
+            // The compositor kept the button release; finish the press that started the drag ourselves.
+            dispatcher.cancelPointer();
+            needsFrame = true;
+            break;
         case EventType::MouseLeave:
             dispatcher.pointerLeave();
             hideTooltip();

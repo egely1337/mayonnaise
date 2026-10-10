@@ -81,6 +81,7 @@ struct Window::Impl final : WidgetHost {
     void setTextInput(bool active, Rect caret) override;
     [[nodiscard]] Size windowSize() const override { return platformWindow->sizeInPoints(); }
     [[nodiscard]] float titleBarHeight() const override;
+    bool startFileDrag(const std::vector<std::string>& paths) override { return platformWindow->startFileDrag(paths); }
 };
 
 }  // namespace mayo

@@ -68,6 +68,11 @@ public:
     [[nodiscard]] virtual Size windowSize() const = 0;
     /// Height of the window's title bar / toolbar strip. Full-size content insets by this.
     [[nodiscard]] virtual float titleBarHeight() const { return 0; }
+    /// Hands a drag of files over to the system, so they can be dropped on other apps (Wayland). Call from
+    /// onPointerMove while the button is still down, typically when the pointer leaves the window. The
+    /// widget holding the pointer then gets onPointerUp with a position far outside the window once the
+    /// drop happened elsewhere. Returns false when the platform can't do it.
+    virtual bool startFileDrag(const std::vector<std::string>& /*paths*/) { return false; }
 };
 
 /// A node in the retained widget tree. Subclass to make custom widgets: override measureContent,

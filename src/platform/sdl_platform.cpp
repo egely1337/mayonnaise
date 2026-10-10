@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "platform.hpp"
+#include "wayland_drag.hpp"
 
 namespace mayo::platform {
 
@@ -21,6 +22,13 @@ std::unordered_map<WindowId, PlatformWindow*> g_windows;
 std::array<SDL_Cursor*, 6> g_cursors{};
 CursorShape g_currentCursor = CursorShape::Arrow;
 Uint32 g_wakeEvent = 0;
+Uint32 g_dragEndEvent = 0;
+
+void* waylandDisplay() {
+    const char* driver = SDL_GetCurrentVideoDriver();
+    if (!driver || std::strcmp(driver, "wayland") != 0) return nullptr;
+    return SDL_GetPointerProperty(SDL_GetGlobalProperties(), SDL_PROP_GLOBAL_VIDEO_WAYLAND_WL_DISPLAY_POINTER, nullptr);
+}
 
 #ifdef __linux__
 /// Name of the kernel driver bound to a DRM card ("amdgpu", "i915", "nvidia").
@@ -303,6 +311,19 @@ void PlatformWindow::setTextInputActive(bool active, Rect caretRect) {
     m_impl->textInput = active;
 }
 
+bool PlatformWindow::startFileDrag(const std::vector<std::string>& paths) {
+    void* display = waylandDisplay();
+    void* surface = SDL_GetPointerProperty(SDL_GetWindowProperties(m_impl->window), SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    const SDL_WindowID id = SDL_GetWindowID(m_impl->window);
+    return wayland::startFileDrag(display, surface, paths, [id] {
+        SDL_Event e;
+        SDL_zero(e);
+        e.type = g_dragEndEvent;
+        e.user.windowID = id;
+        SDL_PushEvent(&e);
+    });
+}
+
 // ---------------------------------------------------------------------------------------------
 bool Platform::init(const std::string& appId) {
     if (!appId.empty()) SDL_SetHint(SDL_HINT_APP_ID, appId.c_str());
@@ -331,6 +352,8 @@ bool Platform::init(const std::string& appId) {
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     g_wakeEvent = SDL_RegisterEvents(1);
+    g_dragEndEvent = SDL_RegisterEvents(1);
+    if (void* display = waylandDisplay()) wayland::prepare(display);
     return true;
 }
 
@@ -446,6 +469,11 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
                 out.type = EventType::Wake;
                 return true;
             }
+            if (e.type == g_dragEndEvent) {
+                out.type = EventType::DragEnded;
+                out.window = e.user.windowID;
+                return true;
+            }
             return false;
     }
     out.window = e.window.windowID;
@@ -457,14 +485,20 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
 bool Platform::waitEvent(PlatformEvent& out, double timeoutSeconds) {
     SDL_Event e;
     Sint32 ms = timeoutSeconds < 0 ? -1 : static_cast<Sint32>(std::ceil(timeoutSeconds * 1000.0));
+    // During an outgoing drag the drop target asks for the data over our own Wayland queue, which SDL's wait
+    // doesn't report: wake up often enough to answer.
+    if (wayland::dragActive() && (ms < 0 || ms > 15)) ms = 15;
     while (SDL_WaitEventTimeout(&e, ms)) {
+        wayland::dispatch();
         if (translate(e, out)) return true;
         ms = 0;  // swallowed an untranslated event; don't block again past the deadline
     }
+    wayland::dispatch();
     return false;
 }
 
 bool Platform::pollEvent(PlatformEvent& out) {
+    wayland::dispatch();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (translate(e, out)) return true;

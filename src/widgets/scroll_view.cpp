@@ -9,7 +9,10 @@
 namespace mayo {
 
 namespace {
-constexpr double kGestureEnd = 0.07;   // seconds without touchpad events = fingers lifted
+constexpr double kGestureEnd = 0.08;   // seconds without touchpad events = fingers lifted
+constexpr double kFlingWindow = 0.08;  // momentum velocity is measured over the gesture's last 80 ms
+constexpr float kMinFling = 120.0f;    // slower than this (points/second) and the content just stops
+constexpr float kMaxFling = 9000.0f;
 constexpr float kDecay = 2.2f;         // momentum velocity decay per second (macOS "normal" rate)
 constexpr float kSpringK = 170.0f;     // rubber-band spring stiffness
 constexpr double kBarLinger = 0.9;     // scrollbars stay visible after activity
@@ -122,8 +125,10 @@ bool ScrollViewView::onScroll(const ScrollEvent& e) {
         m_phase = Phase::Gliding;
         m_velocity = {};
     } else {
-        double dt = std::clamp(t - m_lastEvent, 0.004, 0.05);
-        if (m_phase != Phase::Tracking) m_velocity = {};
+        if (m_phase != Phase::Tracking) {
+            m_velocity = {};
+            m_samples.clear();
+        }
         for (int i = 0; i < 2; ++i) {
             float d = component(delta, i);
             float o = component(m_offset, i);
@@ -132,9 +137,10 @@ bool ScrollViewView::onScroll(const ScrollEvent& e) {
             // Rubber band: movement past the edge meets increasing resistance.
             if ((o <= 0 && d < 0) || (o >= m && d > 0)) d *= 0.45f / (1.0f + over / 40.0f);
             setComponent(m_offset, i, o + d);
-            float v = component(m_velocity, i);
-            setComponent(m_velocity, i, v + (d / static_cast<float>(dt) - v) * 0.5f);
+            setComponent(delta, i, d);
         }
+        m_samples.emplace_back(t, delta);
+        while (!m_samples.empty() && t - m_samples.front().first > kFlingWindow * 2) m_samples.pop_front();
         m_phase = Phase::Tracking;
         m_lastEvent = t;
         if (auto* h = host()) h->scheduleFrame(t + kGestureEnd + 0.01);
@@ -161,7 +167,21 @@ void ScrollViewView::step(double t) {
     if (m_phase == Phase::Tracking) {
         if (t - m_lastEvent < kGestureEnd) return;
         m_phase = Phase::Momentum;
-        if (m_velocity.length() < 60) m_velocity = {};
+        // Fling velocity from the movement just before the fingers stopped sending events. A finger that
+        // slowed down and rested (rather than flicked and lifted) has moved little in that window, so the
+        // content stops instead of drifting away on a stale velocity.
+        Vec2 moved;
+        double first = m_lastEvent;
+        for (const auto& [ts, d] : m_samples) {
+            if (m_lastEvent - ts > kFlingWindow) continue;
+            moved = moved + d;
+            first = std::min(first, ts);
+        }
+        m_samples.clear();
+        const auto span = static_cast<float>(std::max(0.02, m_lastEvent - first + 0.008));
+        m_velocity = moved * (1.0f / span);
+        if (m_velocity.length() < kMinFling) m_velocity = {};
+        if (const float len = m_velocity.length(); len > kMaxFling) m_velocity = m_velocity * (kMaxFling / len);
     }
 
     bool active = false;

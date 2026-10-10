@@ -327,8 +327,11 @@ Known issues / next steps:
   windows) N frames can finish before `App::after` timers fire.
 - **Backdrop materials ignore the colour opacity stack by construction** (they output the blurred scene), so
   group opacity is passed separately (`clip2.y`) — otherwise fading popovers pop in at full opacity.
-- **Wheel vs touchpad**: SDL3 gives no device type; fractional deltas are treated as touchpad (1:1 + momentum),
-  whole notches as a wheel (animated glide). Touchpad gesture end = no events for 70 ms.
+- **Wheel vs touchpad**: SDL3 gives no device type. Deltas that aren't multiples of 1/120 notch are touchpad
+  (1:1 + momentum); whole notches and high-resolution wheel fractions are a wheel (animated glide). A touchpad
+  event can land on a whole value, so events within 250 ms of a touchpad event stay touchpad — per-event
+  classification made single events jump 40 pt mid-gesture. Gesture end = no events for 80 ms; the fling
+  velocity comes from the last 80 ms of movement only, so a finger that rested before lifting doesn't drift.
 - **LeakSanitizer** reports ~311 bytes in `<unknown module>` frames: Mesa allocations in driver modules that
   `SDL_Quit` unloads, reproducible with a bare SDL3 + GL program. Run the apps with
   `LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp`.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <deque>
+
 #include "../widget.hpp"
 
 namespace mayo {
@@ -48,6 +50,7 @@ private:
     float m_insetTop = 0;
     Vec2 m_offset;
     Vec2 m_velocity;  // points/second
+    std::deque<std::pair<double, Vec2>> m_samples;  // recent touchpad deltas, for the fling velocity
     Phase m_phase = Phase::Idle;
     double m_lastEvent = 0;
     double m_lastStep = 0;

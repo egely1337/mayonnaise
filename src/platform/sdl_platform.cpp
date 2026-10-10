@@ -396,8 +396,19 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
                 dx = -dx;
                 dy = -dy;
             }
-            // Touchpads report fractional deltas; wheels report whole notches.
-            out.precise = dx != std::floor(dx) || dy != std::floor(dy);
+            // Touchpads report arbitrary fractional deltas; wheels report notches, and high-resolution wheels
+            // fractions of a notch in 1/120 steps. A single touchpad event can still land on a whole value
+            // (1.0, or 0 on the idle axis), so once a gesture looks like a touchpad, events that follow it
+            // closely stay "precise" — otherwise one event would turn into a 40 pt wheel glide mid-gesture.
+            static Uint64 lastPrecise = 0;
+            auto notchLike = [](float v) {
+                const float scaled = v * 120.0f;
+                return std::abs(scaled - std::round(scaled)) < 1e-3f;
+            };
+            const bool fractional = !notchLike(dx) || !notchLike(dy);
+            if (fractional) lastPrecise = e.wheel.timestamp;
+            constexpr Uint64 kStickyNs = 250'000'000;
+            out.precise = fractional || (lastPrecise != 0 && e.wheel.timestamp - lastPrecise < kStickyNs);
             out.delta = Vec2{dx, -dy};
             out.modifiers = translateMods(SDL_GetModState());
             return true;

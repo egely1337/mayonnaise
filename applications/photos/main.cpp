@@ -1038,7 +1038,33 @@ int main(int argc, char** argv) {
         if (!saved.empty()) addPaths(saved);
     }
     std::vector<std::string> args(argv + 1, argv + argc);
-    if (!args.empty()) addPaths(args);
+    if (!args.empty()) {
+        addPaths(args);
+        // An image passed on the command line ("Open With Photos") opens in the viewer; folders only import.
+        std::string first;
+        for (const auto& a : args) {
+            std::error_code ec;
+            if (fs::is_directory(a, ec)) continue;
+            const fs::path abs = fs::weakly_canonical(a, ec);
+            if (!ec && isImageFile(abs)) {
+                first = abs.string();
+                break;
+            }
+        }
+        if (!first.empty()) {
+            section = "all";
+            query.clear();
+            rebuildSidebar();
+            refresh();
+            // After the first layout, so the viewer has a host to take keyboard focus from.
+            app.post([&, first] {
+                const auto& list = grid->photos();
+                for (size_t i = 0; i < list.size(); ++i) {
+                    if (list[i]->path == first) return openViewer(static_cast<int>(i));
+                }
+            });
+        }
+    }
 
     // MAYO_DEMO=viewer[:index] | zoom[:index] | open | favorite | settings, for screenshots and smoke tests.
     if (const char* env = std::getenv("MAYO_DEMO")) {

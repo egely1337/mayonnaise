@@ -49,6 +49,34 @@ TEST_CASE("ScrollView: touchpad momentum continues after the gesture and stops")
     CHECK(f.scroll->offset().y <= 1600.0f);
 }
 
+TEST_CASE("ScrollView: a finger that slows down and rests doesn't fling") {
+    ScrollFixture f;
+    // Fast, then decelerating to a stop before the fingers lift.
+    for (float d : {30.0f, 30.0f, 25.0f, 15.0f, 6.0f, 2.0f, 0.5f}) {
+        f.host.clock += 0.016;
+        f.scroll->onScroll(f.precise(d));
+    }
+    f.host.clock += 0.09;  // resting, then lifted: no events for a while
+    for (float d : {0.3f}) {
+        f.scroll->onScroll(f.precise(d));
+    }
+    const float atRest = f.scroll->offset().y;
+    f.run(2.0);
+    CHECK(f.scroll->offset().y == doctest::Approx(atRest).epsilon(0.001));
+}
+
+TEST_CASE("ScrollView: pausing during a slow drag doesn't coast") {
+    ScrollFixture f;
+    for (int i = 0; i < 5; ++i) {
+        f.host.clock += 0.016;
+        f.scroll->onScroll(f.precise(1));
+    }
+    const float before = f.scroll->offset().y;
+    f.run(0.3);  // longer than the gesture-end timeout, fingers still down
+    CHECK(f.scroll->offset().y == doctest::Approx(before));
+    CHECK_FALSE(f.scroll->isAnimating());
+}
+
 TEST_CASE("ScrollView: rubber-band overscroll springs back") {
     ScrollFixture f;
     for (int i = 0; i < 5; ++i) {

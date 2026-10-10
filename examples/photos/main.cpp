@@ -114,7 +114,6 @@ private:
             }
             // Only the immutable path is read here; the photo itself is updated on the UI thread.
             auto image = ImageData::load(job.photo->path, job.full ? kFullSize : kThumbnailSize);
-            if (image && job.full) image->setRetainPixels(false);
             m_app.post([job = std::move(job), image] {
                 if (!image) {
                     job.photo->failed = true;

@@ -1,6 +1,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include "../render/gl.hpp"
 #include "../render/image_io.hpp"
@@ -15,7 +18,9 @@ void setGLContextAlive(bool alive);
 
 namespace {
 App* g_app = nullptr;
-}
+/// Idle time after which freed heap memory is handed back to the OS.
+constexpr double kTrimDelay = 1.0;
+}  // namespace
 
 App::Impl::Impl() {
     if (const char* a = std::getenv("MAYO_APPEARANCE")) {
@@ -61,6 +66,7 @@ void App::Impl::runDueTimers() {
         });
     }
     for (auto& fn : due) fn();
+    if (!due.empty()) trimPending = true;
 }
 
 double App::Impl::nextDeadline() const {
@@ -168,10 +174,20 @@ int App::run() {
     while (!m_impl->quitRequested && !m_impl->windows.empty()) {
         double deadline = m_impl->nextDeadline();
         double timeout = deadline < 0 ? -1.0 : std::max(0.0, deadline - Platform::now());
+        // glibc keeps freed memory (and worker threads' arenas) mapped; after a burst of work such as image
+        // decoding that can be tens of MB. Once the app has been idle for a moment, give it back.
+        const bool trimWhenIdle = deadline < 0 && m_impl->trimPending;
+        if (trimWhenIdle) timeout = kTrimDelay;
         platform::PlatformEvent event;
         if (Platform::waitEvent(event, timeout)) {
             m_impl->dispatch(event);
             while (Platform::pollEvent(event)) m_impl->dispatch(event);
+            m_impl->trimPending = true;
+        } else if (trimWhenIdle) {
+#ifdef __GLIBC__
+            malloc_trim(0);
+#endif
+            m_impl->trimPending = false;
         }
         m_impl->runDueTimers();
         m_impl->renderDueWindows();

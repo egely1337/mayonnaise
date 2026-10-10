@@ -18,7 +18,7 @@ struct ImageData::Impl {
     render::DecodedImage pixels;
     int originalW = 0;
     int originalH = 0;
-    bool retain = true;
+    bool retain = false;  // static images drop their CPU copy once uploaded
     bool dynamic = false;  // updated every frame: no mipmaps, sub-image uploads
     bool dirty = false;
 
@@ -97,6 +97,7 @@ std::shared_ptr<ImageData> ImageData::create(int width, int height) {
     d.pixels.assign(static_cast<size_t>(width) * height * 4, 0);
     for (size_t i = 3; i < d.pixels.size(); i += 4) d.pixels[i] = 255;
     img->m_impl->dynamic = true;
+    img->m_impl->retain = true;
     img->m_impl->fit(0);
     return img;
 }

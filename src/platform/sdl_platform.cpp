@@ -4,7 +4,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 #include "platform.hpp"
@@ -18,6 +21,62 @@ std::unordered_map<WindowId, PlatformWindow*> g_windows;
 std::array<SDL_Cursor*, 6> g_cursors{};
 CursorShape g_currentCursor = CursorShape::Arrow;
 Uint32 g_wakeEvent = 0;
+
+#ifdef __linux__
+/// Name of the kernel driver bound to a DRM card ("amdgpu", "i915", "nvidia").
+std::string drmDriver(const std::filesystem::path& card) {
+    std::error_code ec;
+    auto target = std::filesystem::read_symlink(card / "device" / "driver", ec);
+    return ec ? std::string() : target.filename().string();
+}
+
+/// On hybrid laptops glvnd's libEGL loads every installed vendor. When Mesa drives the display, the NVIDIA
+/// EGL stack is pure overhead (~90 MB of mapped libraries, ~6 MB private, and it can wake the dGPU), so
+/// restrict EGL to Mesa for this process. Only on Wayland, where the compositor (not an NVIDIA-primary X
+/// server) owns the display, and only when every connected screen hangs off a non-NVIDIA GPU. PRIME offload
+/// (`prime-run`), explicit glvnd variables and MAYO_EGL_ALL_VENDORS=1 opt out. Returns true if applied.
+bool preferMesaEgl() {
+    namespace fs = std::filesystem;
+    for (const char* var : {"__EGL_VENDOR_LIBRARY_FILENAMES", "__EGL_VENDOR_LIBRARY_DIRS", "__NV_PRIME_RENDER_OFFLOAD",
+                            "MAYO_GLX", "MAYO_EGL_ALL_VENDORS"}) {
+        if (std::getenv(var)) return false;
+    }
+    const char* driver = std::getenv("SDL_VIDEO_DRIVER");
+    if (!std::getenv("WAYLAND_DISPLAY") || (driver && std::strcmp(driver, "wayland") != 0)) return false;
+
+    std::error_code ec;
+    fs::path mesa;
+    bool nvidiaVendor = false;
+    for (const char* dir : {"/etc/glvnd/egl_vendor.d", "/usr/share/glvnd/egl_vendor.d"}) {
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (name.find("nvidia") != std::string::npos) nvidiaVendor = true;
+            if (name.find("mesa") != std::string::npos && mesa.empty()) mesa = entry.path();
+        }
+    }
+    if (!nvidiaVendor || mesa.empty()) return false;
+
+    // Connected connectors are named card<N>-<port>; the dGPU often has none (or is suspended and absent).
+    bool otherConnected = false;
+    for (const auto& entry : fs::directory_iterator("/sys/class/drm", ec)) {
+        const std::string name = entry.path().filename().string();
+        const auto dash = name.find('-');
+        if (name.rfind("card", 0) != 0 || dash == std::string::npos) continue;
+        std::ifstream statusFile(entry.path() / "status");
+        std::string status;
+        if (!(statusFile >> status) || status != "connected") continue;
+        if (drmDriver(entry.path().parent_path() / name.substr(0, dash)) == "nvidia") return false;
+        otherConnected = true;
+    }
+    if (!otherConnected) return false;
+
+    setenv("__EGL_VENDOR_LIBRARY_FILENAMES", mesa.c_str(), 1);
+    if (const char* v = std::getenv("MAYO_VERBOSE"); v && *v && *v != '0')
+        SDL_Log("mayonnaise: Mesa drives the display; EGL restricted to %s", mesa.c_str());
+    return true;
+}
+bool g_restrictedEgl = false;
+#endif
 
 float envScaleOverride() {
     if (const char* s = std::getenv("MAYO_SCALE")) {
@@ -144,6 +203,17 @@ PlatformWindow::PlatformWindow(const WindowConfig& config) : m_impl(std::make_un
             std::abort();
         }
         SDL_GL_MakeCurrent(m_impl->window, g_context);
+#ifdef __linux__
+        // glvnd has picked its vendors; don't pass the restriction on to programs we launch.
+        if (g_restrictedEgl) {
+            unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
+            using GetString = const unsigned char* (*)(unsigned);
+            auto getString = reinterpret_cast<GetString>(SDL_GL_GetProcAddress("glGetString"));
+            const auto* renderer = getString ? reinterpret_cast<const char*>(getString(0x1F01 /* GL_RENDERER */)) : nullptr;
+            if (renderer && std::strstr(renderer, "llvmpipe"))
+                SDL_Log("mayonnaise: software rendering with Mesa-only EGL; set MAYO_EGL_ALL_VENDORS=1 to load all vendors");
+        }
+#endif
     } else {
         SDL_GL_MakeCurrent(m_impl->window, g_context);
     }
@@ -230,6 +300,9 @@ bool Platform::init() {
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
     // EGL on X11 too (Wayland always uses it): zero-copy video needs EGL dma-buf import.
     if (!std::getenv("MAYO_GLX")) SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
+#ifdef __linux__
+    g_restrictedEgl = preferMesaEgl();
+#endif
     // Without this, the first click on an unfocused window is swallowed — macOS delivers it.
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {

@@ -1,8 +1,10 @@
 #include "renderer2d.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 
 #include "embedded.hpp"
 
@@ -10,6 +12,7 @@ namespace mayo::render {
 
 namespace {
 constexpr float kNoClip = 1e7f;
+constexpr size_t kStreamBytes = 512 * 1024;  // instance ring buffer; grows for huge batches
 }
 
 Renderer2D::Renderer2D() {
@@ -435,19 +438,35 @@ void Renderer2D::flush() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_batchTexture ? m_batchTexture : m_whiteTexture.id());
 
+    // Instances stream into one buffer used as a ring: each flush writes after the previous one (unsynchronized,
+    // that range is unused since the last orphan) and points the attributes at it. Re-specifying the whole
+    // buffer on every flush made the driver allocate and cache a fresh buffer per batch, tens of MB of GTT
+    // (system RAM on integrated GPUs) with many batches per frame.
     glBindVertexArray(m_vao.id());
     glBindBuffer(GL_ARRAY_BUFFER, m_instanceBuffer.id());
     const size_t bytes = m_instances.size() * sizeof(Instance);
-    if (m_instances.size() > m_instanceCapacity) {
-        m_instanceCapacity = std::max(m_instances.size(), m_instanceCapacity * 2);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_instanceCapacity * sizeof(Instance)), nullptr,
-                     GL_STREAM_DRAW);
-    } else {
-        // Orphan so the driver doesn't stall on the previous draw still reading the buffer.
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_instanceCapacity * sizeof(Instance)), nullptr,
-                     GL_STREAM_DRAW);
+    if (bytes > m_streamSize) {
+        m_streamSize = std::max<size_t>(kStreamBytes, std::bit_ceil(bytes));
+        m_streamOffset = m_streamSize;  // forces the orphan below
     }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(bytes), m_instances.data());
+    if (m_streamOffset + bytes > m_streamSize) {
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_streamSize), nullptr, GL_STREAM_DRAW);
+        m_streamOffset = 0;
+    }
+    void* dst = glMapBufferRange(GL_ARRAY_BUFFER, static_cast<GLintptr>(m_streamOffset), static_cast<GLsizeiptr>(bytes),
+                                 GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+    if (dst) {
+        std::memcpy(dst, m_instances.data(), bytes);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    } else {
+        glBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(m_streamOffset), static_cast<GLsizeiptr>(bytes),
+                        m_instances.data());
+    }
+    for (GLuint i = 0; i < 10; ++i) {
+        glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(Instance),
+                              reinterpret_cast<const void*>(m_streamOffset + i * 4 * sizeof(float)));
+    }
+    m_streamOffset += (bytes + 255) & ~size_t{255};
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(m_instances.size()));
     glBindVertexArray(0);
     ++m_drawCalls;

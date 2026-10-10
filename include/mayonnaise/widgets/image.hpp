@@ -37,9 +37,11 @@ public:
     /// Size before any downscaling in load()/scaledToFit().
     [[nodiscard]] int originalWidth() const;
     [[nodiscard]] int originalHeight() const;
-    /// A downscaled copy fitting in maxDimension x maxDimension (CPU, thread-safe).
+    /// A downscaled copy fitting in maxDimension x maxDimension (CPU). Needs the CPU pixels: call it before
+    /// the first draw, or keep them with setRetainPixels(true).
     [[nodiscard]] std::shared_ptr<ImageData> scaledToFit(int maxDimension) const;
-    /// Free the CPU copy once the texture is uploaded (large photos). scaledToFit() then returns nullptr.
+    /// Static images free their CPU copy once the GPU texture is uploaded (it would double their memory).
+    /// Pass true to keep it, e.g. to call scaledToFit() later. Images from create() always keep theirs.
     void setRetainPixels(bool retain);
 
     struct Impl;

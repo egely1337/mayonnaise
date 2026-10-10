@@ -19,6 +19,7 @@ struct App::Impl {
     Appearance appearance = Appearance::Light;
     Color accent = Theme::defaultAccent();
     bool running = false;
+    bool trimPending = false;  // work happened since the heap was last returned to the OS
     struct Timer {
         double due;
         std::function<void()> fn;

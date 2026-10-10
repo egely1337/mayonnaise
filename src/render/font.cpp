@@ -35,14 +35,22 @@ using FacePtr = std::unique_ptr<std::remove_pointer_t<FT_Face>, FaceDeleter>;
 }  // namespace
 
 struct FontLibrary::Impl {
+    /// One FreeType face per (weight, optical size); ~70 KB each for the variable font. The pixel size is
+    /// switched on demand instead of keeping a face per size (text at many sizes and scales used to open
+    /// dozens of faces).
+    struct Face {
+        FacePtr face;
+        FT_F26Dot6 size = -1;  // current char size in 26.6 pixels; -1 = unset
+    };
+
     FT_Library library = nullptr;
-    std::unordered_map<std::uint64_t, FacePtr> metricFaces;
-    std::unordered_map<std::uint64_t, FacePtr> rasterFaces;
+    std::unordered_map<std::uint64_t, Face> faces;
     std::unordered_map<std::uint64_t, float> advances;  // em units
     std::unordered_map<std::uint64_t, FontMetrics> metrics;  // per em
     FT_UInt wghtAxis = ~0u;
     FT_UInt opszAxis = ~0u;
     FT_UInt axisCount = 0;
+    FT_UShort unitsPerEm = 2048;
     std::vector<FT_Fixed> defaults;
 
     Impl() {
@@ -51,6 +59,7 @@ struct FontLibrary::Impl {
             std::abort();
         }
         FacePtr probe = openFace(400, 14, false);
+        unitsPerEm = probe->units_per_EM;
         FT_MM_Var* mm = nullptr;
         if (FT_Get_MM_Var(probe.get(), &mm) == 0) {
             axisCount = mm->num_axis;
@@ -64,8 +73,7 @@ struct FontLibrary::Impl {
     }
 
     ~Impl() {
-        metricFaces.clear();
-        rasterFaces.clear();
+        faces.clear();
         FT_Done_FreeType(library);
     }
 
@@ -92,28 +100,28 @@ struct FontLibrary::Impl {
         return (static_cast<std::uint64_t>(font.weight) << 8) | static_cast<std::uint64_t>(opticalSize(font.size));
     }
 
-    FT_Face metricFace(const Font& font) {
+    /// The style's face set to `px64` (26.6 pixels).
+    FT_Face face(const Font& font, FT_F26Dot6 px64) {
         auto key = styleKey(font);
-        auto it = metricFaces.find(key);
-        if (it != metricFaces.end()) return it->second.get();
-        FacePtr face = openFace(static_cast<int>(font.weight), opticalSize(font.size), true);
-        // One pixel per font unit: advances come back as exact (variation-adjusted) design units.
-        FT_Set_Pixel_Sizes(face.get(), 0, face->units_per_EM);
-        FT_Face raw = face.get();
-        metricFaces.emplace(key, std::move(face));
-        return raw;
+        auto it = faces.find(key);
+        if (it == faces.end()) {
+            it = faces.emplace(key, Face{openFace(static_cast<int>(font.weight), opticalSize(font.size), true)}).first;
+        }
+        Face& f = it->second;
+        if (f.size != px64) {
+            FT_Set_Char_Size(f.face.get(), 0, px64, 72, 72);
+            f.size = px64;
+        }
+        return f.face.get();
+    }
+
+    /// One pixel per font unit: advances come back as exact (variation-adjusted) design units.
+    FT_Face metricFace(const Font& font) {
+        return face(font, static_cast<FT_F26Dot6>(unitsPerEm) * 64);
     }
 
     FT_Face rasterFace(const Font& font, float pixelSize) {
-        auto px64 = static_cast<std::uint64_t>(std::lround(pixelSize * 64.0f));
-        auto key = (styleKey(font) << 24) | px64;
-        auto it = rasterFaces.find(key);
-        if (it != rasterFaces.end()) return it->second.get();
-        FacePtr face = openFace(static_cast<int>(font.weight), opticalSize(font.size), true);
-        FT_Set_Char_Size(face.get(), 0, static_cast<FT_F26Dot6>(px64), 72, 72);
-        FT_Face raw = face.get();
-        rasterFaces.emplace(key, std::move(face));
-        return raw;
+        return face(font, static_cast<FT_F26Dot6>(std::lround(pixelSize * 64.0f)));
     }
 };
 

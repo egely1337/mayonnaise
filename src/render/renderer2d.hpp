@@ -93,7 +93,8 @@ private:
     gl::VertexArray m_vao;
     gl::VertexArray m_emptyVao;
     gl::Buffer m_instanceBuffer;
-    size_t m_instanceCapacity = 0;
+    size_t m_streamSize = 0;    // bytes; the instance buffer is used as a ring, see flush()
+    size_t m_streamOffset = 0;
     gl::Texture m_whiteTexture;
     GLint m_uViewport = -1;
     GLint m_uTexture = -1;

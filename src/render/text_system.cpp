@@ -30,9 +30,32 @@ void TextSystem::reset(int size) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    // glTexImage2D with null data leaves contents undefined; clear so padding stays empty.
-    std::vector<std::uint8_t> zeros(static_cast<size_t>(size) * static_cast<size_t>(size), 0);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size, size, GL_RED, GL_UNSIGNED_BYTE, zeros.data());
+    // glTexImage2D with null data leaves contents undefined; clear so padding stays empty. Clearing through
+    // a framebuffer avoids uploading a zero buffer (up to 16 MB) through the driver's staging memory.
+    // This can run mid-frame (atlas full), so the caller's framebuffer state is restored afterwards.
+    GLint previous = 0;
+    GLint viewport[4] = {};
+    GLfloat clearColor[4] = {};
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    gl::Framebuffer fb = gl::makeFramebuffer();
+    glBindFramebuffer(GL_FRAMEBUFFER, fb.id());
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_atlas.id(), 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        glDisable(GL_SCISSOR_TEST);
+        glViewport(0, 0, size, size);
+        glClearColor(0, 0, 0, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+    } else {
+        std::vector<std::uint8_t> zeros(static_cast<size_t>(size) * static_cast<size_t>(size), 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size, size, GL_RED, GL_UNSIGNED_BYTE, zeros.data());
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
 }
 
 bool TextSystem::allocate(int w, int h, int& x, int& y) {

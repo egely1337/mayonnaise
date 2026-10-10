@@ -66,6 +66,21 @@ background thread every 1–5 s (View menu); the app itself uses well under 1 % 
 Per-process network traffic isn't available on Linux without root/eBPF, so the Network tab lists open
 sockets per process; disk I/O per process is only readable for your own processes.
 
+### Settings
+
+Every app gets persistent preferences in `~/.config/mayonnaise/<app>/settings.conf` and follows the desktop's
+light/dark mode and accent colour unless the user picks their own:
+
+```cpp
+mayo::App app("notes");                                   // settings go to ~/.config/mayonnaise/notes/
+auto& window = app.createWindow({.title = "Notes", .autosaveName = "main"});  // remembers its size
+bool wrap = app.settings().getBool("wrapLines", true);
+app.settings().set("wrapLines", false);                   // saved shortly after, atomically
+auto prefs = mayo::Form({mayo::AppearanceSettings(app)}); // Auto / Light / Dark + accent colour, live
+```
+
+All examples have a Settings window (Ctrl+,).
+
 ### Finder example
 
 `examples/finder` is a file manager modelled on the macOS Finder: Icons, List (with disclosure triangles) and

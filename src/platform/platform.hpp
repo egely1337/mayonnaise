@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "mayonnaise/events.hpp"
+#include "mayonnaise/color.hpp"
 #include "mayonnaise/geometry.hpp"
+#include "mayonnaise/theme.hpp"
 
 namespace mayo::platform {
 
@@ -42,6 +44,7 @@ enum class EventType : std::uint8_t {
     DropFile, DropPosition, DropComplete,
     Pinch,
     Wake,
+    SystemThemeChanged,  // desktop switched between light and dark
 };
 
 struct PlatformEvent {
@@ -84,6 +87,7 @@ public:
     void setTitle(const std::string& title);
     void show();
     void minimize();
+    void raise();
     void toggleMaximize();
     void setFullscreen(bool fullscreen);
     void setMinimumSize(int w, int h);
@@ -123,6 +127,10 @@ public:
     static std::string clipboardText();
     static void setClipboardText(const std::string& text);
     static float doubleClickTime();  // seconds
+    /// The desktop's light/dark preference, if it has one (xdg-desktop-portal on Linux, via SDL).
+    static std::optional<Appearance> systemAppearance();
+    /// The desktop's accent colour, if it publishes one (portal `org.freedesktop.appearance accent-color`).
+    static std::optional<Color> systemAccentColor();
 
     static PlatformWindow* windowFromId(WindowId id);
     /// Native open dialog (xdg portal / zenity). `done` may run on another thread; an empty list means

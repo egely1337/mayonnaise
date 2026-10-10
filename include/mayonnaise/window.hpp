@@ -32,6 +32,10 @@ public:
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;
     void close();
+    /// Brings the window to the front (the compositor may only flash it on Wayland).
+    void raise();
+    /// Runs when the window has been closed (by the user or close()), before it is destroyed.
+    void onClosed(std::function<void()> handler);
     void setFullscreen(bool fullscreen);
     [[nodiscard]] bool isFullscreen() const;
     /// Fades the title bar (traffic lights, title, toolbar) out or back in — for media playback.

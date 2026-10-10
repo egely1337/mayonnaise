@@ -56,6 +56,25 @@ bool isImageFile(const fs::path& p) {
     return kExt.count(lower(p.extension().string())) > 0;
 }
 
+/// Settings values are strings; lists of paths are stored one per line.
+std::vector<std::string> splitLines(const std::string& s) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start < s.size()) {
+        size_t end = s.find('\n', start);
+        if (end == std::string::npos) end = s.size();
+        if (end > start) out.push_back(s.substr(start, end - start));
+        start = end + 1;
+    }
+    return out;
+}
+
+std::string joinLines(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const auto& l : lines) out += (out.empty() ? "" : "\n") + l;
+    return out;
+}
+
 std::string formatBytes(std::uintmax_t b) {
     char buf[32];
     if (b >= 1000 * 1000) std::snprintf(buf, sizeof buf, "%.1f MB", static_cast<double>(b) / 1e6);
@@ -614,8 +633,13 @@ public:
 }  // namespace
 
 int main(int argc, char** argv) {
-    App app;
-    auto& window = app.createWindow({.title = "Photos", .width = 1120, .height = 760, .minWidth = 700, .minHeight = 460});
+    App app("photos");
+    auto& window = app.createWindow(
+        {.title = "Photos", .width = 1120, .height = 760, .minWidth = 700, .minHeight = 460, .autosaveName = "main"});
+    Settings& prefs = app.settings();
+    // Favourites outlive the library: a re-imported photo is still a favourite.
+    std::set<std::string> favoritePaths;
+    for (auto& p : splitLines(prefs.getString("favorites"))) favoritePaths.insert(std::move(p));
     Loader loader(app, std::clamp(std::thread::hardware_concurrency(), 2u, 6u) - 1);
 
     std::vector<PhotoPtr> library;
@@ -761,8 +785,21 @@ int main(int argc, char** argv) {
         grid->select(grid->selected());
     };
 
+    auto saveLibrary = [&] {
+        if (!prefs.getBool("rememberLibrary", true)) {
+            prefs.remove("library");
+            return;
+        }
+        std::vector<std::string> paths;
+        for (const auto& p : library) paths.push_back(p->path);
+        prefs.set("library", joinLines(paths));
+    };
+
     auto toggleFavorite = [&](const PhotoPtr& ph) {
         ph->favorite = !ph->favorite;
+        if (ph->favorite) favoritePaths.insert(ph->path);
+        else favoritePaths.erase(ph->path);
+        prefs.set("favorites", joinLines({favoritePaths.begin(), favoritePaths.end()}));
         rebuildSidebar();
         if (!viewer->isVisible() && section == "favorites") refresh();
         grid->invalidate();
@@ -819,10 +856,12 @@ int main(int argc, char** argv) {
         }
         if (added.empty()) return;
         for (const auto& ph : added) {
+            ph->favorite = favoritePaths.count(ph->path) > 0;
             library.push_back(ph);
             loader.thumbnail(ph, [&] { grid->invalidate(); });
         }
         std::sort(folders.begin(), folders.end());
+        saveLibrary();
         rebuildSidebar();
         refresh();
     };
@@ -833,6 +872,7 @@ int main(int argc, char** argv) {
     openImagesButton.onClick(openImages);
     openFolderButton.onClick(openFolder);
 
+    std::function<void()> openSettings;
     libraryToolbar = Toolbar({
         Menu("Import", {MenuItem("Open Images…", openImages).withIcon(Icon::Photo).withShortcut("Ctrl+O"),
                         MenuItem("Open Folder…", openFolder).withIcon(Icon::Folder).withShortcut("Ctrl+Shift+O")})
@@ -847,6 +887,7 @@ int main(int argc, char** argv) {
             query = q;
             refresh();
         }),
+        Button(Icon::Gear).style(ButtonStyle::Borderless).tooltip("Settings (Ctrl+,)").onClick([&] { openSettings(); }),
     });
     viewerToolbar = Toolbar({
         ToolbarGroup({Button(Icon::ChevronLeft).style(ButtonStyle::Borderless).tooltip("Back to Library (Esc)").onClick([&] {
@@ -856,8 +897,17 @@ int main(int argc, char** argv) {
         ToolbarGroup({favoriteButton, infoButton}),
     });
 
-    sizeSlider.onChange([&](float v) { grid->setTileSize(v); });
-    grid->onTileSizeChanged = [&](float v) { sizeSlider.setValue(v); };
+    std::function<void()> syncSettings;  // keeps an open Settings window in step
+    sizeSlider.onChange([&](float v) {
+        grid->setTileSize(v);
+        prefs.set("tileSize", grid->tileSize());
+        if (syncSettings) syncSettings();
+    });
+    grid->onTileSizeChanged = [&](float v) {
+        sizeSlider.setValue(v);
+        prefs.set("tileSize", v);
+        if (syncSettings) syncSettings();
+    };
     grid->onOpen = [&](int i) { openViewer(i); };
     grid->onToggleFavorite = [&](int i) { toggleFavorite(grid->photos()[static_cast<size_t>(i)]); };
     grid->onRemove = [&](int i) {
@@ -868,9 +918,67 @@ int main(int argc, char** argv) {
         });
         if (section.rfind("folder:", 0) == 0 && std::find(folders.begin(), folders.end(), section.substr(7)) == folders.end())
             section = "all";
+        saveLibrary();
         rebuildSidebar();
         refresh();
         grid->select(i);
+    };
+
+    // Settings window (Ctrl+,) ------------------------------------------------------------------------
+    Window* settingsWindow = nullptr;
+    openSettings = [&] {
+        if (settingsWindow) {
+            settingsWindow->raise();
+            return;
+        }
+        auto& w = app.createWindow({.title = "Photos Settings", .width = 540, .height = 520, .minWidth = 460, .minHeight = 340});
+        auto remember = Toggle("", prefs.getBool("rememberLibrary", true)).onChange([&](bool on) {
+            prefs.set("rememberLibrary", on);
+            saveLibrary();
+        });
+        auto tiles = Slider(grid->tileSize(), 80, 320).width(180).onChange([&](float v) { grid->setTileSize(v); grid->onTileSizeChanged(grid->tileSize()); });
+        auto count = Label("").secondary();
+        auto clear = Button("Clear Library").style(ButtonStyle::Destructive);
+        auto updateCount = [&, count, clear]() mutable {
+            count.setText(library.size() == 1 ? "1 photo" : std::to_string(library.size()) + " photos");
+            clear.setDisabled(library.empty());
+        };
+        clear.onClick([&, updateCount]() mutable {
+            // Only forgets the photos; nothing is deleted from disk.
+            if (viewer->isVisible()) closeViewer();
+            library.clear();
+            folders.clear();
+            section = "all";
+            saveLibrary();
+            rebuildSidebar();
+            refresh();
+            updateCount();
+        });
+        updateCount();
+        auto form = Form({
+            AppearanceSettings(app),
+            FormSection("Library",
+                        {FormRow("Reopen library at launch", remember, "Imported photos come back next time"),
+                         FormRow("Thumbnail size", tiles), FormRow("Library", HStack({count, clear}).spacing(12).align(Alignment::Center))},
+                        "Clearing the library never deletes files. Favorites are remembered either way."),
+        });
+        w.setContent(ScrollView(VStack({form}).padding(Insets(12, 24, 24, 24))));
+        w.onKey([&w](const KeyEvent& e) {
+            if (e.key == Key::Escape || (e.primary() && e.key == Key::W)) {
+                w.close();
+                return true;
+            }
+            return false;
+        });
+        syncSettings = [&, tiles, updateCount]() mutable {
+            tiles.setValue(grid->tileSize());
+            updateCount();
+        };
+        w.onClosed([&] {
+            settingsWindow = nullptr;
+            syncSettings = nullptr;
+        });
+        settingsWindow = &w;
     };
     viewer->onNavigate = [&](int i) { openViewer(i); };
     viewer->onClose = [&] { closeViewer(); };
@@ -904,6 +1012,10 @@ int main(int argc, char** argv) {
             e.shift() ? openFolder() : openImages();
             return true;
         }
+        if (e.primary() && e.key == Key::Comma) {
+            openSettings();
+            return true;
+        }
         return false;
     });
 
@@ -912,10 +1024,23 @@ int main(int argc, char** argv) {
     rebuildSidebar();
     refresh();
 
+    {
+        const float tile = std::clamp(prefs.getFloat("tileSize", 170), 80.0f, 320.0f);
+        grid->setTileSize(tile);
+        sizeSlider.setValue(tile);
+    }
+    if (prefs.getBool("rememberLibrary", true)) {
+        std::vector<std::string> saved;
+        std::error_code ec;
+        for (auto& p : splitLines(prefs.getString("library"))) {
+            if (fs::exists(p, ec)) saved.push_back(std::move(p));  // moved or deleted photos drop out
+        }
+        if (!saved.empty()) addPaths(saved);
+    }
     std::vector<std::string> args(argv + 1, argv + argc);
     if (!args.empty()) addPaths(args);
 
-    // MAYO_DEMO=viewer[:index] | zoom[:index] | open | dark, for screenshots and smoke tests.
+    // MAYO_DEMO=viewer[:index] | zoom[:index] | open | favorite | settings, for screenshots and smoke tests.
     if (const char* env = std::getenv("MAYO_DEMO")) {
         std::string demo = env;
         int index = demo.find(':') != std::string::npos ? std::atoi(demo.c_str() + demo.find(':') + 1) : 0;
@@ -923,8 +1048,11 @@ int main(int argc, char** argv) {
         if (demo == "viewer" || demo == "zoom") app.after(0.6, [&, index] { openViewer(index); });
         if (demo == "zoom") app.after(1.2, [&] { viewer->onKeyDown(KeyEvent{Key::Num1}); });
         if (demo == "open") app.after(0.3, openImages);
+        if (demo == "settings") app.after(0.3, [&] { openSettings(); });
         if (demo == "favorite") app.after(0.6, [&] {
-            for (int i : {1, 4, 6}) toggleFavorite(grid->photos()[static_cast<size_t>(i)]);
+            for (int i : {1, 4, 6}) {
+                if (i < static_cast<int>(grid->photos().size())) toggleFavorite(grid->photos()[static_cast<size_t>(i)]);
+            }
             grid->select(4);
         });
     }

@@ -38,7 +38,7 @@ constexpr float kStatusBarHeight = 26;
 /// status bar sit along the bottom.
 class FinderPage : public Widget {
 public:
-    std::shared_ptr<Widget> iconScroll, listHeader, listScroll, columnScroll, empty, bottom;
+    std::shared_ptr<Widget> iconScroll, listHeader, listScroll, columnScroll, empty, bottom, pathBar, statusBar;
     std::shared_ptr<Widget> menuAnchor = std::make_shared<Widget>();
     ViewMode mode = ViewMode::Icons;
 
@@ -47,7 +47,7 @@ public:
 
     void arrangeContent(const Rect& c) override {
         const float bar = host() ? host()->titleBarHeight() : 52.0f;
-        const float bottomH = kPathBarHeight + kStatusBarHeight;
+        const float bottomH = bottomHeight();
         const Rect area{c.x, c.y, c.width, c.height - bottomH};
         const Rect below{c.x, c.y + bar, c.width, area.height - bar};
         auto place = [](const std::shared_ptr<Widget>& w, const Rect& r) {
@@ -67,11 +67,18 @@ public:
         const auto& c = theme().colors;
         p.fillRect(frame(), c.contentBackground);
         const Rect b = bottom->frame();
-        p.fillRect(b, c.windowBackground);
-        const float px = 1.0f / p.scale();
-        p.fillRect({b.x, p.snap(b.y), b.width, px}, c.separator);
-        p.fillRect({b.x, p.snap(b.y + kPathBarHeight), b.width, px}, c.separator.multipliedAlpha(0.6f));
+        if (b.height > 0) {
+            p.fillRect(b, c.windowBackground);
+            const float px = 1.0f / p.scale();
+            p.fillRect({b.x, p.snap(b.y), b.width, px}, c.separator);
+            if (pathBar->isVisible() && statusBar->isVisible())
+                p.fillRect({b.x, p.snap(b.y + kPathBarHeight), b.width, px}, c.separator.multipliedAlpha(0.6f));
+        }
         paintChildren(p);
+    }
+
+    [[nodiscard]] float bottomHeight() const {
+        return (pathBar->isVisible() ? kPathBarHeight : 0.0f) + (statusBar->isVisible() ? kStatusBarHeight : 0.0f);
     }
 };
 
@@ -113,8 +120,11 @@ std::string expandUser(std::string path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    App app;
-    auto& window = app.createWindow({.title = "Finder", .width = 1120, .height = 720, .minWidth = 680, .minHeight = 420});
+    App app("finder");
+    auto& window = app.createWindow(
+        {.title = "Finder", .width = 1120, .height = 720, .minWidth = 680, .minHeight = 420, .autosaveName = "main"});
+    Settings& prefs = app.settings();
+    std::function<void()> syncSettings;  // refreshes the Settings window's controls while it is open
     window.setTitleVisible(false);  // the toolbar shows the folder name after the navigation buttons
     const bool demo = std::getenv("MAYO_DEMO") != nullptr;  // never launch other programs from demo runs
 
@@ -167,7 +177,12 @@ int main(int argc, char** argv) {
     auto listRows = std::make_shared<ListRowsView>(browser, columns);
     auto listScroll = ScrollView(Element(listRows));
     listRows->setScroller(listScroll.node().get());
-    listHeader->onColumnsResized = [&] { listRows->invalidate(); };
+    listHeader->onColumnsResized = [&] {
+        listRows->invalidate();
+        prefs.set("list.modifiedWidth", columns->modified);
+        prefs.set("list.sizeWidth", columns->size);
+        prefs.set("list.kindWidth", columns->kind);
+    };
 
     auto columnBrowser = std::make_shared<ColumnBrowserView>(browser);
     auto columnScroll = ScrollView(Element(columnBrowser)).axes(ScrollAxes::Horizontal);
@@ -196,6 +211,8 @@ int main(int argc, char** argv) {
     page->columnScroll = columnScroll.node();
     page->empty = empty.node();
     page->bottom = bottom.node();
+    page->pathBar = pathBar;
+    page->statusBar = statusBar.node();
     for (auto& w : {page->iconScroll, page->listHeader, page->listScroll, page->columnScroll, page->empty, page->bottom,
                     page->menuAnchor}) {
         page->addChild(w);
@@ -389,6 +406,7 @@ int main(int argc, char** argv) {
         }
         if (changed) {
             browser->path = path;
+            prefs.set("lastFolder", path);
             previews.cancelPending();
             watcher.watch(path);
             listRows->collapseAll();
@@ -440,6 +458,7 @@ int main(int argc, char** argv) {
         listScroll.setHidden(m != ViewMode::List);
         columnScroll.setHidden(m != ViewMode::Columns);
         viewControl->setSelected(static_cast<int>(m));
+        prefs.set("view", m == ViewMode::Icons ? "icons" : m == ViewMode::List ? "list" : "columns");
         if (m == ViewMode::Columns) columnBrowser->rebuild(true);
         else focusView();
         updateEmptyState();
@@ -754,6 +773,11 @@ int main(int argc, char** argv) {
     };
 
     browser->sortChanged = [&] {
+        constexpr const char* kSortNames[] = {"name", "modified", "size", "kind"};
+        prefs.set("sortBy", kSortNames[static_cast<int>(browser->sort.key)]);
+        prefs.set("sortAscending", browser->sort.ascending);
+        prefs.set("foldersOnTop", browser->sort.foldersFirst);
+        if (syncSettings) syncSettings();
         reload();
         if (browser->searching) {
             sortEntries(browser->entries, browser->sort);
@@ -763,6 +787,7 @@ int main(int argc, char** argv) {
 
     browser->resizeIcons = [&](float size) {
         browser->iconSize = std::clamp(std::round(size), 32.0f, 128.0f);
+        prefs.set("iconSize", browser->iconSize);
         sizeSlider.setValue(browser->iconSize);
         iconView->reload();
     };
@@ -823,6 +848,8 @@ int main(int argc, char** argv) {
 
     auto toggleHidden = [&] {
         browser->showHidden = !browser->showHidden;
+        prefs.set("showHidden", browser->showHidden);
+        if (syncSettings) syncSettings();
         reload();
     };
 
@@ -843,6 +870,64 @@ int main(int argc, char** argv) {
     auto undo = [&] {
         if (!ops.canUndo()) return;
         ops.undo([&](std::vector<std::string> restored) { selectAfterOp(restored); });
+    };
+
+    // Settings window (Ctrl+,) ------------------------------------------------------------------------
+    Window* settingsWindow = nullptr;
+    auto setBarVisible = [&](const std::shared_ptr<Widget>& bar, const char* key, bool on) {
+        bar->setHidden(!on);
+        prefs.set(key, on);
+        page->invalidateLayout();
+    };
+    auto openSettings = [&] {
+        if (settingsWindow) {
+            settingsWindow->raise();
+            return;
+        }
+        auto& w = app.createWindow({.title = "Finder Settings", .width = 560, .height = 620, .minWidth = 480, .minHeight = 360});
+        const std::string where = prefs.getString("startIn", "home");
+        auto startPicker = Picker({"Home", "Recents", "Last Folder Visited"}, where == "recents" ? 1 : where == "last" ? 2 : 0)
+                               .onChange([&](int i) { prefs.set("startIn", i == 1 ? "recents" : i == 2 ? "last" : "home"); });
+        auto hidden = Toggle("", browser->showHidden).onChange([&](bool on) {
+            if (on != browser->showHidden) toggleHidden();
+        });
+        auto foldersOnTop = Toggle("", browser->sort.foldersFirst).onChange([&](bool on) {
+            if (on == browser->sort.foldersFirst) return;
+            browser->sort.foldersFirst = on;
+            browser->sortChanged();
+        });
+        auto showPath = Toggle("", page->pathBar->isVisible()).onChange([&](bool on) {
+            setBarVisible(page->pathBar, "showPathBar", on);
+        });
+        auto showStatus = Toggle("", page->statusBar->isVisible()).onChange([&](bool on) {
+            setBarVisible(page->statusBar, "showStatusBar", on);
+        });
+        auto form = Form({
+            AppearanceSettings(app),
+            FormSection("General", {FormRow("New windows open", startPicker), FormRow("Show hidden files", hidden, "Ctrl+H"),
+                                    FormRow("Keep folders on top", foldersOnTop)}),
+            FormSection("Window", {FormRow("Show path bar", showPath), FormRow("Show status bar", showStatus)},
+                        "Settings are saved in " + (isInside(prefs.directory(), home) ? "~" + prefs.directory().substr(home.size())
+                                                                                          : prefs.directory())),
+        });
+        w.setContent(ScrollView(VStack({form}).padding(Insets(12, 24, 24, 24))));
+        w.onKey([&w](const KeyEvent& e) {
+            if (e.key == Key::Escape || (e.primary() && e.key == Key::W)) {
+                w.close();
+                return true;
+            }
+            return false;
+        });
+        // Changes made in the main window (Ctrl+H, the sort menu) show up here too.
+        syncSettings = [hidden, foldersOnTop, browser]() mutable {
+            hidden.isOn(browser->showHidden);
+            foldersOnTop.isOn(browser->sort.foldersFirst);
+        };
+        w.onClosed([&] {
+            settingsWindow = nullptr;
+            syncSettings = nullptr;
+        });
+        settingsWindow = &w;
     };
 
     // Menus --------------------------------------------------------------------------------------------
@@ -945,6 +1030,7 @@ int main(int argc, char** argv) {
         std::vector<MenuItem> items{
             MenuItem("New Folder", newFolder).withIcon(Icon::FolderPlus).withShortcut("Ctrl+Shift+N").disabled(!isRealFolder() || inTrash()),
             MenuItem("Go to Folder…", goToFolder).withShortcut("Ctrl+Shift+G"),
+            MenuItem("Settings…", openSettings).withIcon(Icon::Gear).withShortcut("Ctrl+,"),
             MenuItem("Get Info", showInfo).withIcon(Icon::Info).withShortcut("Ctrl+I"),
             MenuItem("Open in Terminal", openTerminalHere).withIcon(Icon::Terminal),
             MenuItem::separator(),
@@ -1039,6 +1125,7 @@ int main(int argc, char** argv) {
                     searchField->selectAll();
                     return true;
                 case Key::W: window.close(); return true;
+                case Key::Comma: openSettings(); return true;
                 default: break;
             }
         }
@@ -1064,8 +1151,38 @@ int main(int argc, char** argv) {
     // Start ------------------------------------------------------------------------------------------------------
     window.setContent(split);
     rebuildSidebar();
-    setMode(ViewMode::Icons);
-    std::string start = argc > 1 ? expandUser(argv[1]) : home;
+
+    // Restore the last session's choices.
+    browser->showHidden = prefs.getBool("showHidden");
+    {
+        const std::string by = prefs.getString("sortBy", "name");
+        browser->sort.key = by == "modified" ? SortKey::Modified : by == "size" ? SortKey::Size
+                            : by == "kind"   ? SortKey::Kind
+                                             : SortKey::Name;
+        browser->sort.ascending = prefs.getBool("sortAscending", true);
+        browser->sort.foldersFirst = prefs.getBool("foldersOnTop", true);
+    }
+    browser->iconSize = std::clamp(std::round(prefs.getFloat("iconSize", 64)), 32.0f, 128.0f);
+    sizeSlider.setValue(browser->iconSize);
+    columns->modified = std::clamp(prefs.getFloat("list.modifiedWidth", columns->modified), 50.0f, 400.0f);
+    columns->size = std::clamp(prefs.getFloat("list.sizeWidth", columns->size), 50.0f, 400.0f);
+    columns->kind = std::clamp(prefs.getFloat("list.kindWidth", columns->kind), 50.0f, 400.0f);
+    pathBar->setHidden(!prefs.getBool("showPathBar", true));
+    statusBar.setHidden(!prefs.getBool("showStatusBar", true));
+    {
+        const std::string view = prefs.getString("view", "icons");
+        setMode(view == "list" ? ViewMode::List : view == "columns" ? ViewMode::Columns : ViewMode::Icons);
+    }
+    // "New windows open": home (default), Recents, or the last folder visited.
+    std::string start = home;
+    if (const std::string where = prefs.getString("startIn", "home"); where == "recents") {
+        start = kRecents;
+    } else if (where == "last") {
+        std::error_code ec;
+        const std::string last = prefs.getString("lastFolder");
+        if (last == kRecents || (!last.empty() && fs::is_directory(last, ec))) start = last;
+    }
+    if (argc > 1) start = expandUser(argv[1]);
     {
         std::error_code ec;
         if (start != kRecents) start = fs::absolute(start, ec).lexically_normal().string();
@@ -1076,7 +1193,8 @@ int main(int argc, char** argv) {
     // MAYO_DEMO=<step>[,<step>...] drives the window for screenshots and smoke tests. Steps: list, columns,
     // select:<name>, quicklook[:name], info[:name], menu[:name], rename[:name], search:<query>, size:<points>,
     // goto, open:<name>, back, up, newfolder, trash:<name>, undo, duplicate:<name>, copy:<name>, cut:<name>,
-    // paste, renameto:<old>=<new>, drop:<item>=<folder>, hidden, type:<letters>, wait:<seconds>.
+    // paste, renameto:<old>=<new>, drop:<item>=<folder>, hidden, type:<letters>, settings, closesettings,
+    // wait:<seconds>.
     if (const char* env = std::getenv("MAYO_DEMO")) {
         auto selectNamed = [&](const std::string& name) {
             for (const auto& e : browser->entries) {
@@ -1120,6 +1238,10 @@ int main(int argc, char** argv) {
                     startSearch(arg);
                 } else if (what == "goto") {
                     goToFolder();
+                } else if (what == "settings") {
+                    openSettings();
+                } else if (what == "closesettings") {
+                    if (settingsWindow) settingsWindow->close();
                 } else if (what == "open") {
                     selectNamed(arg);
                     openSelection();

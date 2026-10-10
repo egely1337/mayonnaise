@@ -118,6 +118,13 @@ Key translateKey(SDL_Keycode k) {
         case SDLK_END: return Key::End;
         case SDLK_PAGEUP: return Key::PageUp;
         case SDLK_PAGEDOWN: return Key::PageDown;
+        case SDLK_COMMA: return Key::Comma;
+        case SDLK_PERIOD: return Key::Period;
+        case SDLK_MINUS:
+        case SDLK_KP_MINUS: return Key::Minus;
+        case SDLK_EQUALS:
+        case SDLK_KP_PLUS: return Key::Equals;
+        case SDLK_SLASH: return Key::Slash;
         default: return Key::Unknown;
     }
 }
@@ -260,6 +267,7 @@ bool PlatformWindow::isFullscreen() const {
 void PlatformWindow::setTitle(const std::string& title) { SDL_SetWindowTitle(m_impl->window, title.c_str()); }
 void PlatformWindow::show() { SDL_ShowWindow(m_impl->window); }
 void PlatformWindow::minimize() { SDL_MinimizeWindow(m_impl->window); }
+void PlatformWindow::raise() { SDL_RaiseWindow(m_impl->window); }
 void PlatformWindow::toggleMaximize() {
     if (isMaximized())
         SDL_RestoreWindow(m_impl->window);
@@ -348,6 +356,7 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
     };
     switch (e.type) {
         case SDL_EVENT_QUIT: out.type = EventType::Quit; return true;
+        case SDL_EVENT_SYSTEM_THEME_CHANGED: out.type = EventType::SystemThemeChanged; return true;
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED: out.type = EventType::WindowClose; break;
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: out.type = EventType::WindowResized; break;
@@ -528,6 +537,14 @@ void Platform::showOpenDialog(PlatformWindow* parent, const std::vector<DialogFi
 PlatformWindow* Platform::windowFromId(WindowId id) {
     auto it = g_windows.find(id);
     return it != g_windows.end() ? it->second : nullptr;
+}
+
+std::optional<Appearance> Platform::systemAppearance() {
+    switch (SDL_GetSystemTheme()) {
+        case SDL_SYSTEM_THEME_DARK: return Appearance::Dark;
+        case SDL_SYSTEM_THEME_LIGHT: return Appearance::Light;
+        default: return std::nullopt;
+    }
 }
 
 void* Platform::eglDisplay() { return SDL_EGL_GetCurrentDisplay(); }

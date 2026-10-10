@@ -53,6 +53,8 @@ public:
     [[nodiscard]] std::string decoderDescription() const;
     [[nodiscard]] double frameRate() const { return m_frameRate; }
     [[nodiscard]] int droppedFrames() const { return m_dropped; }
+    /// Allow GPU decoding for files opened from now on (MAYO_HWDEC still picks the API).
+    void setHardwareDecoding(bool enabled) { m_hwAllowed = enabled; }
     /// Called when a dma-buf import failed: decode into system memory from now on.
     void disableZeroCopy() { m_zeroCopy = false; }
     // Used by the decoder's get_format callback.
@@ -107,6 +109,7 @@ private:
     AVBufferRef* m_hwDevice = nullptr;
     int m_hwFormat = -1;          // AVPixelFormat of hardware surfaces
     std::string m_hwName;
+    bool m_hwAllowed = true;
     std::atomic<bool> m_hwFellBack{false};
     std::atomic<bool> m_zeroCopy{false};
     std::atomic<int> m_dropped{0};

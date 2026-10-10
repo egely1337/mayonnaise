@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -20,11 +23,36 @@ namespace {
 App* g_app = nullptr;
 /// Idle time after which freed heap memory is handed back to the OS.
 constexpr double kTrimDelay = 1.0;
+/// Settings are written this long after the last change (a slider drag is a single write).
+constexpr double kSettingsSaveDelay = 0.5;
+
+std::string defaultAppName() {
+#ifdef __GLIBC__
+    if (program_invocation_short_name && *program_invocation_short_name) return program_invocation_short_name;
+#endif
+    return "mayonnaise";
+}
+
+const char* modeName(AppearanceMode m) {
+    switch (m) {
+        case AppearanceMode::Light: return "light";
+        case AppearanceMode::Dark: return "dark";
+        case AppearanceMode::System: break;
+    }
+    return "system";
+}
+
+std::string hexColor(Color c) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "#%06X", static_cast<unsigned>(c.toRGBA8() >> 8));
+    return buf;
+}
 }  // namespace
 
 App::Impl::Impl() {
     if (const char* a = std::getenv("MAYO_APPEARANCE")) {
-        appearance = std::string(a) == "dark" ? Appearance::Dark : Appearance::Light;
+        envAppearance = std::string(a) == "dark" ? Appearance::Dark : Appearance::Light;
+        appearance = *envAppearance;
     }
     if (const char* s = std::getenv("MAYO_SCREENSHOT")) screenshotPath = s;
     if (const char* f = std::getenv("MAYO_SCREENSHOT_FRAMES")) screenshotFrames = std::atoi(f);
@@ -40,12 +68,54 @@ void App::Impl::rebuildTheme() {
     for (auto& w : windows) w->impl().themeChanged();
 }
 
+AppearanceMode App::Impl::mode() const {
+    const std::string s = settings->getString("appearance");
+    if (s == "light") return AppearanceMode::Light;
+    if (s == "dark") return AppearanceMode::Dark;
+    if (s == "system") return AppearanceMode::System;
+    return defaultMode;
+}
+
+bool App::Impl::followsSystemAccent() const {
+    const std::string s = settings->getString("accent", "system");
+    return s == "system" || !Color::parse(s);
+}
+
+void App::Impl::refreshAppearance(bool rereadAccent) {
+    Appearance a = Appearance::Light;
+    if (envAppearance) {
+        a = *envAppearance;
+    } else if (const AppearanceMode m = mode(); m == AppearanceMode::System) {
+        a = platform::Platform::systemAppearance().value_or(Appearance::Light);
+    } else {
+        a = m == AppearanceMode::Dark ? Appearance::Dark : Appearance::Light;
+    }
+    Color c = Theme::defaultAccent();
+    if (followsSystemAccent()) {
+        if (rereadAccent) systemAccent = platform::Platform::systemAccentColor();
+        if (systemAccent) c = nearestAccent(*systemAccent).color;
+    } else {
+        c = Color::parse(settings->getString("accent")).value_or(Theme::defaultAccent());
+    }
+    if (a == appearance && c == accent) return;
+    appearance = a;
+    accent = c;
+    rebuildTheme();
+}
+
 void App::Impl::dispatch(const platform::PlatformEvent& event) {
     using platform::EventType;
     if (event.type == EventType::Quit) {
         quitRequested = true;
         return;
     }
+    if (event.type == EventType::SystemThemeChanged) {
+        refreshAppearance(true);
+        return;
+    }
+    // The portal can't be asked to notify us cheaply about accent changes; coming back to the app after
+    // changing it in the desktop settings is the moment it matters.
+    if (event.type == EventType::WindowFocusGained && followsSystemAccent()) refreshAppearance(true);
     for (auto& w : windows) {
         if (w->impl().platformWindow->id() == event.window) {
             w->impl().handleEvent(event);
@@ -92,6 +162,10 @@ void App::Impl::renderDueWindows() {
     }
     if (!screenshotPath.empty() && !windows.empty()) {
         if (++framesRendered >= screenshotFrames && platform::Platform::now() - startTime >= screenshotDelay) {
+            // All windows share one scene buffer: render the one to capture last.
+            const char* which = std::getenv("MAYO_SCREENSHOT_WINDOW");
+            Window& target = which && std::string(which) == "last" ? *windows.back() : *windows.front();
+            target.impl().render();
             int w = 0;
             int h = 0;
             auto pixels = renderer->readPixels(w, h);
@@ -106,19 +180,41 @@ void App::Impl::renderDueWindows() {
 }
 
 void App::Impl::reapClosedWindows() {
+    for (auto& w : windows) {
+        if (!w->impl().closed || !w->impl().closedHandler) continue;
+        auto handler = std::move(w->impl().closedHandler);
+        w->impl().closedHandler = nullptr;
+        handler();
+    }
     std::erase_if(windows, [](const std::unique_ptr<Window>& w) { return w->impl().closed; });
 }
 
-App::App() : m_impl(std::make_unique<Impl>()) {
+App::App() : App(defaultAppName()) {}
+
+App::App(std::string name) : m_impl(std::make_unique<Impl>()) {
     if (g_app) {
         std::fprintf(stderr, "mayonnaise: only one mayo::App may exist at a time\n");
         std::abort();
     }
     g_app = this;
+    Impl* impl = m_impl.get();
+    impl->name = std::move(name);
+    impl->settings = std::make_unique<Settings>(impl->name);
+    impl->settings->setReadOnly(!impl->screenshotPath.empty());
+    impl->settings->setOnChange([this, impl] {
+        if (impl->settingsSavePending) return;
+        impl->settingsSavePending = true;
+        after(kSettingsSaveDelay, [impl] {
+            impl->settingsSavePending = false;
+            impl->settings->save();
+        });
+    });
     if (!platform::Platform::init()) std::abort();
+    impl->refreshAppearance(true);
 }
 
 App::~App() {
+    m_impl->settings->save();
     m_impl->windows.clear();
     m_impl->text.reset();
     m_impl->renderer.reset();
@@ -145,7 +241,17 @@ Window& App::createWindow(const WindowOptions& options) {
     config.minWidth = options.minWidth;
     config.minHeight = options.minHeight;
     config.resizable = options.resizable;
+    bool maximized = false;
+    if (!options.autosaveName.empty()) {
+        const Settings& s = *m_impl->settings;
+        const std::string key = "window." + options.autosaveName + ".";
+        config.width = std::clamp(s.getInt(key + "width", options.width), options.minWidth, 16384);
+        config.height = std::clamp(s.getInt(key + "height", options.height), options.minHeight, 16384);
+        maximized = s.getBool(key + "maximized");
+    }
     auto impl = std::make_unique<Window::Impl>(config);
+    impl->autosaveName = options.autosaveName;
+    impl->restoreMaximized = maximized;
     if (m_impl->windows.empty() && !gl::load()) {
         std::fprintf(stderr, "mayonnaise: failed to load OpenGL 3.3 functions\n");
         std::abort();
@@ -157,7 +263,7 @@ Window& App::createWindow(const WindowOptions& options) {
     auto window = std::unique_ptr<Window>(new Window(std::move(impl)));
     Window& ref = *window;
     m_impl->windows.push_back(std::move(window));
-    if (m_impl->running) ref.impl().platformWindow->show();
+    if (m_impl->running) ref.impl().show();
     return ref;
 }
 
@@ -168,7 +274,7 @@ int App::run() {
     // Render once before showing so the first visible frame isn't garbage.
     for (auto& w : m_impl->windows) {
         w->impl().render();
-        w->impl().platformWindow->show();
+        w->impl().show();
         w->impl().needsFrame = true;
     }
     while (!m_impl->quitRequested && !m_impl->windows.empty()) {
@@ -238,16 +344,33 @@ void App::openFolder(std::function<void(std::vector<std::string>)> done, Window*
     showDialog(*this, parent, {}, true, false, std::move(done));
 }
 
+const std::string& App::name() const { return m_impl->name; }
+Settings& App::settings() { return *m_impl->settings; }
+
+void App::setAppearanceMode(AppearanceMode mode) {
+    m_impl->envAppearance.reset();  // an explicit choice beats MAYO_APPEARANCE
+    m_impl->settings->set("appearance", modeName(mode));
+    m_impl->refreshAppearance(false);
+}
+AppearanceMode App::appearanceMode() const { return m_impl->mode(); }
+void App::setDefaultAppearanceMode(AppearanceMode mode) {
+    m_impl->defaultMode = mode;
+    m_impl->refreshAppearance(false);
+}
 void App::setAppearance(Appearance appearance) {
-    if (m_impl->appearance == appearance) return;
-    m_impl->appearance = appearance;
-    m_impl->rebuildTheme();
+    setAppearanceMode(appearance == Appearance::Dark ? AppearanceMode::Dark : AppearanceMode::Light);
 }
 Appearance App::appearance() const { return m_impl->appearance; }
+
 void App::setAccentColor(Color accent) {
-    m_impl->accent = accent;
-    m_impl->rebuildTheme();
+    m_impl->settings->set("accent", hexColor(accent));
+    m_impl->refreshAppearance(false);
 }
+void App::setAccentFollowsSystem(bool follow) {
+    m_impl->settings->set("accent", follow ? std::string("system") : hexColor(m_impl->accent));
+    m_impl->refreshAppearance(follow);
+}
+bool App::accentFollowsSystem() const { return m_impl->followsSystemAccent(); }
 Color App::accentColor() const { return m_impl->accent; }
 const Theme& App::theme() const { return m_impl->theme; }
 

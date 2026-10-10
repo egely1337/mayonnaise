@@ -275,6 +275,7 @@ void MediaPlayer::stopThreads() {
 }
 
 bool MediaPlayer::setupHardware(const AVCodec*& codec, int codecId) {
+    if (!m_hwAllowed) return false;
     for (AVHWDeviceType type : wantedDevices()) {
         // The default decoder may be software-only (libdav1d for AV1); find one that supports `type`.
         const AVCodec* candidate = hwFormatFor(codec, type) >= 0 ? codec : nullptr;

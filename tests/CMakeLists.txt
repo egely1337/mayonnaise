@@ -1,4 +1,4 @@
-add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp test_images.cpp)
+add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp test_images.cpp test_settings.cpp)
 target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest mayonnaise_stb)
 # The library already compiles stb_image_write's implementation; tests only use the declarations.
 target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)

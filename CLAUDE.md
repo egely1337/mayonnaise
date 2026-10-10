@@ -39,7 +39,7 @@ MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery
 ```
 
 Useful environment variables:
-- `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
+- `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window (`MAYO_SCREENSHOT_WINDOW=last`: the newest, e.g. a Settings window) after n frames (and at least s seconds, default 0.4) and quit. Screenshot runs never write settings.
 - `MAYO_DEMO=picker|menu|popover|<page>` (gallery) / `MAYO_DEMO=scroll` (settings_app) /
   `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) / `MAYO_DEMO=seek:<s>` (video_player) — drive the
   examples at startup for screenshots. The finder takes comma-separated steps, including file operations
@@ -53,6 +53,8 @@ Useful environment variables:
 - `MAYO_VERBOSE=1` — print GL version/renderer and whether KHR_debug output is on.
 - `SDL_VIDEO_DRIVER=x11|wayland` — force SDL backend.
 - `MAYO_EGL_ALL_VENDORS=1` — load every glvnd EGL vendor (see the hybrid-GPU gotcha).
+- `XDG_CONFIG_HOME=<dir>` — where settings live (`<dir>/mayonnaise/<app>/settings.conf`); point it at a scratch
+  directory when testing so runs don't touch your real preferences.
 
 CMake options: `MAYONNAISE_BUILD_EXAMPLES` (ON), `MAYONNAISE_BUILD_TESTS` (ON),
 `MAYONNAISE_USE_SYSTEM_DEPS` (OFF), `MAYONNAISE_SANITIZE` (OFF).
@@ -166,6 +168,16 @@ Known issues / next steps:
   Cheap (no stencil, no batch breaks) and correct for the UI case of rect clips nested in rounded panels.
 - **Overlays (menus, popovers) are measured at their ideal size** (`{inf, inf}`), then clamped to the window, so
   expanding content (spacers) doesn't stretch them to full width.
+- **Settings** (`mayo::Settings`, `App::settings()`): one `key = value` file per app in
+  `~/.config/mayonnaise/<app>/settings.conf`, written atomically 0.5 s after the last change and on exit.
+  The App stores `appearance` (system/light/dark), `accent` (system or #RRGGBB) and `window.<name>.*` for
+  windows created with `autosaveName`. Apps are named explicitly (`App app("finder")`); `App()` uses the
+  executable name. Every example has a Settings window (Ctrl+,) built from `AppearanceSettings(app)` plus
+  its own `FormSection`s.
+- **Follows the desktop**: appearance via `SDL_GetSystemTheme` + `SDL_EVENT_SYSTEM_THEME_CHANGED` (portal
+  `color-scheme`); the accent colour via the portal's `accent-color`, read with a dlopen()ed libdbus (no build
+  dependency) at startup and whenever a window gains focus, then snapped to the macOS palette
+  (`nearestAccent`).
 - **Finder example** keeps all views on one shared `Browser` state (folder, entries, selection, hooks into
   `main.cpp`); `FileView` holds the Finder selection rules, rubber band, type-select, inline rename and drag
   and drop so the icon grid, list rows and browser columns only provide geometry. Column view nests vertical
@@ -193,6 +205,11 @@ Known issues / next steps:
 - **One FreeType face per (weight, optical size)**, resized on demand; a face per pixel size cost ~70 KB each.
 - **Finder file operations are real.** Test them in a scratch folder; items trashed on another file system
   go to `$topdir/.Trash-$uid` (e.g. /tmp/.Trash-1000 for tmpfs), as the spec requires.
+- **Screenshot runs never write settings** (read-only `Settings`), but they do read them: use `XDG_CONFIG_HOME`
+  for reproducible shots. Live system-theme switching was implemented against SDL's event but not exercised
+  by an automated run (it would flip the desktop's theme).
+- **Designated initializers and WindowOptions**: new fields need a default member initializer (`{}`), or GCC's
+  `-Wmissing-field-initializers` fires in every example using `{.title = ...}`.
 - **Windows popped up by screenshot runs take keyboard focus**, so typing elsewhere during a run lands in the
   app (type-to-select in the finder). Don't trust a surprising selection in a screenshot without a trace.
 

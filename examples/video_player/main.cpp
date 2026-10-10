@@ -263,15 +263,52 @@ private:
 }  // namespace
 
 int main(int argc, char** argv) {
-    App app;
-    app.setAppearance(Appearance::Dark);  // controls float over video; dark chrome reads best
-    auto& window = app.createWindow({.title = "Video Player", .width = 1000, .height = 620, .minWidth = 480, .minHeight = 320});
+    App app("video_player");
+    app.setDefaultAppearanceMode(AppearanceMode::Dark);  // controls float over video; dark chrome reads best
+    auto& window = app.createWindow(
+        {.title = "Video Player", .width = 1000, .height = 620, .minWidth = 480, .minHeight = 320, .autosaveName = "main"});
+    Settings& prefs = app.settings();
     MediaPlayer player;
+    player.setHardwareDecoding(prefs.getBool("hardwareDecoding", true));
 
     std::deque<std::string> playlist;
-    bool looping = false;
-    bool muted = false;
-    float volume = 1.0f;
+    bool looping = prefs.getBool("loop");
+    bool muted = prefs.getBool("muted");
+    float volume = std::clamp(prefs.getFloat("volume", 1.0f), 0.0f, 1.0f);
+    std::string currentPath;
+
+    // Where each recently played file was left: "seconds<TAB>path" lines, newest first.
+    auto loadPositions = [&] {
+        std::vector<std::pair<double, std::string>> out;
+        const std::string all = prefs.getString("positions");
+        size_t start = 0;
+        while (start < all.size()) {
+            size_t end = all.find('\n', start);
+            if (end == std::string::npos) end = all.size();
+            const std::string line = all.substr(start, end - start);
+            if (const size_t tab = line.find('\t'); tab != std::string::npos)
+                out.emplace_back(std::atof(line.substr(0, tab).c_str()), line.substr(tab + 1));
+            start = end + 1;
+        }
+        return out;
+    };
+    auto rememberPosition = [&] {
+        if (currentPath.empty() || !player.isOpen()) return;
+        auto list = loadPositions();
+        std::erase_if(list, [&](const auto& e) { return e.second == currentPath; });
+        const double pos = player.position();
+        const double dur = player.duration();
+        // Nothing to resume at the very start or end.
+        if (prefs.getBool("resumePlayback", true) && pos > 5 && (dur <= 0 || pos < dur - 5)) list.emplace(list.begin(), pos, currentPath);
+        if (list.size() > 30) list.resize(30);
+        std::string text;
+        char buf[32];
+        for (const auto& [seconds, path] : list) {
+            std::snprintf(buf, sizeof buf, "%.1f", seconds);
+            text += (text.empty() ? "" : "\n") + std::string(buf) + "\t" + path;
+        }
+        prefs.set("positions", text);
+    };
     int activity = 0;
 
     // Controls ---------------------------------------------------------------------------------
@@ -282,6 +319,7 @@ int main(int argc, char** argv) {
     auto loop = std::make_shared<HudButton>(Icon::Repeat, 16);
     auto fullscreen = std::make_shared<HudButton>(Icon::Expand, 16);
     auto infoButton = std::make_shared<HudButton>(Icon::Info, 16);
+    auto settingsButton = std::make_shared<HudButton>(Icon::Gear, 16);
     auto volumeBar = std::make_shared<TrackBar>();
     volumeBar->setValue(1);
     volumeBar->setFixedWidth(84);
@@ -290,7 +328,7 @@ int main(int argc, char** argv) {
     auto remaining = Label("-0:00").font(TextStyle::Subheadline).foreground(Color::white(0.85f)).width(56).textAlign(TextAlign::Trailing);
 
     auto hudContent = VStack({
-                                 HStack({speaker, Element(volumeBar), Spacer(), back, play, forward, Spacer(), Element(infoButton), loop, fullscreen})
+                                 HStack({speaker, Element(volumeBar), Spacer(), back, play, forward, Spacer(), Element(infoButton), Element(settingsButton), loop, fullscreen})
                                      .spacing(6)
                                      .align(Alignment::Center),
                                  HStack({elapsed, Element(timeline), remaining}).spacing(10).align(Alignment::Center),
@@ -304,8 +342,9 @@ int main(int argc, char** argv) {
     emptyIcon.frame(64, 64);
     auto emptyError = Label("").foreground(theme().colors.red).hidden();
     auto openButton = Button("Open…").style(ButtonStyle::Prominent).controlSize(ControlSize::Large);
+    auto settingsLink = Button("Settings…").style(ButtonStyle::Borderless);
     auto empty = VStack({emptyIcon, Label("Open a Video").font(TextStyle::Title2),
-                         Label("Drop a movie or audio file here, or choose one.").secondary(), openButton, emptyError})
+                         Label("Drop a movie or audio file here, or choose one.").secondary(), openButton, settingsLink, emptyError})
                      .spacing(10)
                      .align(Alignment::Center);
 
@@ -346,6 +385,8 @@ int main(int argc, char** argv) {
         surface->invalidate();
     };
     auto applyVolume = [&] {
+        prefs.set("volume", volume);
+        prefs.set("muted", muted);
         player.setVolume(muted ? 0.0f : volume * volume);  // perceptual curve
         speaker->setIcon(muted || volume <= 0.001f ? Icon::SpeakerSlash : Icon::Speaker);
         volumeBar->setValue(muted ? 0.0f : volume);
@@ -359,6 +400,7 @@ int main(int argc, char** argv) {
     };
 
     std::function<bool(const std::string&)> openFile = [&](const std::string& path) {
+        rememberPosition();
         std::string error;
         surface->reset();
         if (!player.open(path, error)) {
@@ -383,6 +425,12 @@ int main(int argc, char** argv) {
         window.setTitle(player.title());
         timeline->setValue(0);
         applyVolume();
+        currentPath = path;
+        if (prefs.getBool("resumePlayback", true)) {
+            for (const auto& [seconds, p] : loadPositions()) {
+                if (p == path) player.seek(seconds);
+            }
+        }
         player.play();
         updatePlayButton();
         poke();
@@ -410,8 +458,10 @@ int main(int argc, char** argv) {
         muted = false;
         applyVolume();
     };
+    loop->setActive(looping);
     loop->onClick = [&] {
         looping = !looping;
+        prefs.set("loop", looping);
         loop->setActive(looping);
     };
     fullscreen->onClick = toggleFullscreen;
@@ -477,11 +527,51 @@ int main(int argc, char** argv) {
         }
     };
 
+    // Settings window (Ctrl+,) ------------------------------------------------------------------------
+    Window* settingsWindow = nullptr;
+    auto openSettings = [&] {
+        if (settingsWindow) {
+            settingsWindow->raise();
+            return;
+        }
+        auto& w = app.createWindow({.title = "Video Player Settings", .width = 540, .height = 480, .minWidth = 460, .minHeight = 320});
+        auto resume = Toggle("", prefs.getBool("resumePlayback", true)).onChange([&](bool on) {
+            prefs.set("resumePlayback", on);
+            if (!on) prefs.remove("positions");  // forget where files were left
+        });
+        auto hardware = Toggle("", prefs.getBool("hardwareDecoding", true)).onChange([&](bool on) {
+            prefs.set("hardwareDecoding", on);
+            player.setHardwareDecoding(on);
+        });
+        auto form = Form({
+            AppearanceSettings(app),
+            FormSection("Playback",
+                        {FormRow("Resume where you left off", resume, "Reopened videos continue from the last position"),
+                         FormRow("Hardware decoding", hardware, "Takes effect with the next video")}),
+        });
+        w.setContent(ScrollView(VStack({form}).padding(Insets(12, 24, 24, 24))));
+        w.onKey([&w](const KeyEvent& e) {
+            if (e.key == Key::Escape || (e.primary() && e.key == Key::W)) {
+                w.close();
+                return true;
+            }
+            return false;
+        });
+        w.onClosed([&] { settingsWindow = nullptr; });
+        settingsWindow = &w;
+    };
+    settingsButton->onClick = openSettings;
+    settingsLink.onClick(openSettings);
+
     window.onFilesDropped(openPaths);
     window.onKey([&](const KeyEvent& e) {
         poke();
         if (e.primary() && e.key == Key::O) {
             chooseFile();
+            return true;
+        }
+        if (e.primary() && e.key == Key::Comma) {
+            openSettings();
             return true;
         }
         switch (e.key) {
@@ -514,14 +604,16 @@ int main(int argc, char** argv) {
     });
 
     hud->setHidden(true);
+    applyVolume();
     window.setContent(Element(page));
 
     std::vector<std::string> args(argv + 1, argv + argc);
     if (!args.empty()) openPaths(args);
 
-    // MAYO_DEMO=seek:<seconds> jumps there and pauses (screenshots); MAYO_DEMO=hide lets the HUD fade.
+    // MAYO_DEMO=seek:<seconds> jumps there and pauses (screenshots); MAYO_DEMO=settings opens the Settings window.
     if (const char* env = std::getenv("MAYO_DEMO")) {
         std::string demo = env;
+        if (demo == "settings") app.after(0.3, openSettings);
         if (demo.rfind("seek:", 0) == 0) {
             double t = std::atof(demo.c_str() + 5);
             app.after(0.3, [&, t] {
@@ -532,5 +624,7 @@ int main(int argc, char** argv) {
             });
         }
     }
-    return app.run();
+    const int code = app.run();
+    rememberPosition();  // saved with the other settings when the App goes away
+    return code;
 }

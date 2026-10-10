@@ -4,10 +4,12 @@ add_library(mayonnaise
   core/color.cpp
   core/event_dispatcher.cpp
   core/layout.cpp
+  core/settings.cpp
   core/test_scene.cpp
   core/widget.cpp
   core/window.cpp
   core/window_root.cpp
+  platform/portal.cpp
   platform/sdl_audio.cpp
   platform/sdl_platform.cpp
   render/gl.cpp
@@ -18,6 +20,7 @@ add_library(mayonnaise
   render/text_system.cpp
   render/video_texture.cpp
   theme/theme.cpp
+  widgets/appearance_settings.cpp
   widgets/button.cpp
   widgets/control.cpp
   widgets/form.cpp
@@ -53,7 +56,8 @@ target_link_libraries(mayonnaise
     $<BUILD_INTERFACE:mayonnaise_stb>
     SDL3::SDL3
     Freetype::Freetype
-    OpenGL::GL)
+    OpenGL::GL
+    ${CMAKE_DL_LIBS})  # libdbus is dlopen()ed for desktop preferences
 mayonnaise_set_warnings(mayonnaise)
 mayonnaise_set_sanitizers(mayonnaise)
 

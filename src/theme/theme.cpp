@@ -1,5 +1,8 @@
 #include "mayonnaise/theme.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
 
 namespace mayo {
 
@@ -155,6 +158,58 @@ Theme Theme::make(Appearance appearance, Color accent) {
     c.brown = kBrown.pick(dark);
     c.gray = kGray.pick(dark);
     return t;
+}
+
+namespace {
+
+constexpr AccentChoice kAccents[] = {
+    {"Blue", Theme::defaultAccent()},   {"Purple", Color::hex(0xA550A7)}, {"Pink", Color::hex(0xF74F9E)},
+    {"Red", Color::hex(0xFF5257)},      {"Orange", Color::hex(0xF7821B)}, {"Yellow", Color::hex(0xFFC600)},
+    {"Green", Color::hex(0x62BA46)},    {"Graphite", Color::hex(0x8C8C8C)},
+};
+
+/// Hue in degrees and saturation (HSV).
+void hueSat(Color c, float& hue, float& sat) {
+    const float mx = std::max({c.r, c.g, c.b});
+    const float mn = std::min({c.r, c.g, c.b});
+    const float d = mx - mn;
+    sat = mx > 0 ? d / mx : 0;
+    if (d <= 0) {
+        hue = 0;
+    } else if (mx == c.r) {
+        hue = 60 * std::fmod((c.g - c.b) / d + 6, 6.0f);
+    } else if (mx == c.g) {
+        hue = 60 * ((c.b - c.r) / d + 2);
+    } else {
+        hue = 60 * ((c.r - c.g) / d + 4);
+    }
+}
+
+}  // namespace
+
+std::span<const AccentChoice> accentChoices() { return kAccents; }
+
+const AccentChoice& nearestAccent(Color c) {
+    float hue = 0;
+    float sat = 0;
+    hueSat(c, hue, sat);
+    const AccentChoice& graphite = kAccents[std::size(kAccents) - 1];
+    if (sat < 0.22f) return graphite;
+    const AccentChoice* best = &kAccents[0];
+    float bestDist = 1e9f;
+    for (const auto& a : kAccents) {
+        if (&a == &graphite) continue;
+        float h = 0;
+        float s = 0;
+        hueSat(a.color, h, s);
+        float d = std::abs(h - hue);
+        d = std::min(d, 360 - d);
+        if (d < bestDist) {
+            bestDist = d;
+            best = &a;
+        }
+    }
+    return *best;
 }
 
 }  // namespace mayo

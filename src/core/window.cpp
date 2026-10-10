@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -58,6 +59,26 @@ void Window::setTitle(const std::string& title) {
 const std::string& Window::title() const { return m_impl->title; }
 Size Window::size() const { return m_impl->platformWindow->sizeInPoints(); }
 void Window::close() { m_impl->closed = true; }
+void Window::raise() { m_impl->platformWindow->raise(); }
+void Window::onClosed(std::function<void()> handler) { m_impl->closedHandler = std::move(handler); }
+
+void Window::Impl::show() {
+    platformWindow->show();
+    if (restoreMaximized && !platformWindow->isMaximized()) platformWindow->toggleMaximize();
+    restoreMaximized = false;
+}
+
+void Window::Impl::rememberFrame() {
+    if (autosaveName.empty() || platformWindow->isFullscreen()) return;
+    Settings& s = App::current().settings();
+    const std::string key = "window." + autosaveName + ".";
+    const bool maximized = platformWindow->isMaximized();
+    s.set(key + "maximized", maximized);
+    if (maximized) return;
+    const Size size = platformWindow->sizeInPoints();
+    s.set(key + "width", static_cast<int>(std::lround(size.width)));
+    s.set(key + "height", static_cast<int>(std::lround(size.height)));
+}
 void Window::setFullscreen(bool fullscreen) { m_impl->platformWindow->setFullscreen(fullscreen); }
 bool Window::isFullscreen() const { return m_impl->platformWindow->isFullscreen(); }
 void Window::setTitleVisible(bool visible) { m_impl->root->setTitleVisible(visible); }
@@ -155,9 +176,12 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
     switch (event.type) {
         case EventType::WindowClose: closed = true; break;
         case EventType::WindowResized:
-        case EventType::WindowScaleChanged:
         case EventType::WindowMaximized:
-        case EventType::WindowRestored: requestLayout(); break;
+        case EventType::WindowRestored:
+            rememberFrame();
+            requestLayout();
+            break;
+        case EventType::WindowScaleChanged: requestLayout(); break;
         case EventType::WindowExposed: requestRedraw(); break;
         case EventType::WindowFocusGained:
             keyWindow = true;

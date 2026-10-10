@@ -749,6 +749,7 @@ ColumnBrowserView::Column ColumnBrowserView::columnFor(const std::string& folder
 
 void ColumnBrowserView::rebuild(bool focusActive) {
     const Browser& b = *m_browser;
+    if (b.path.empty()) return;  // nothing to show before the first navigation
     if (!m_preview) m_preview = std::make_shared<PreviewPaneView>(m_browser);
     std::vector<std::string> chain;
     if (b.searching || b.path == kRecents) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 #include "color.hpp"
 #include "geometry.hpp"
@@ -148,5 +149,16 @@ struct Theme {
     static Theme make(Appearance appearance, Color accent = defaultAccent());
     static constexpr Color defaultAccent() { return Color::hex(0x0088FF); }
 };
+
+/// A named accent colour from the macOS palette.
+struct AccentChoice {
+    const char* name;
+    Color color;
+};
+/// Blue (the default), Purple, Pink, Red, Orange, Yellow, Green, Graphite.
+std::span<const AccentChoice> accentChoices();
+/// The palette entry closest to `c` in hue (greys map to Graphite). Desktop accent colours are snapped to
+/// it so they keep the macOS tones.
+const AccentChoice& nearestAccent(Color c);
 
 }  // namespace mayo

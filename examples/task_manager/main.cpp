@@ -224,13 +224,15 @@ std::vector<Column> columnsFor(Tab tab, const std::uint64_t& memTotal) {
 }  // namespace
 
 int main() {
-    App app;
-    auto& window = app.createWindow({.title = "Task Manager", .width = 1180, .height = 780, .minWidth = 820, .minHeight = 560});
+    App app("task_manager");
+    auto& window = app.createWindow(
+        {.title = "Task Manager", .width = 1180, .height = 780, .minWidth = 820, .minHeight = 560, .autosaveName = "main"});
+    Settings& prefs = app.settings();
 
     std::shared_ptr<SystemSnapshot> latest;
     Tab tab = kCpu;
-    int filter = 0;  // all, mine, others, active
-    bool showKernel = false;
+    int filter = std::clamp(prefs.getInt("filter"), 0, 3);  // all, mine, others, active
+    bool showKernel = prefs.getBool("showKernelThreads");
     std::string query;
 
     // --- process table ------------------------------------------------------------------------
@@ -591,17 +593,22 @@ int main() {
     infoButton.onClick([&] { inspect(model->selected); });
 
     // --- toolbar -------------------------------------------------------------------------------
-    auto filterPicker = Picker({"All Processes", "My Processes", "Other Users", "Active Processes"}).onChange([&](int i) {
+    auto filterPicker = Picker({"All Processes", "My Processes", "Other Users", "Active Processes"}, filter).onChange([&](int i) {
         filter = i;
+        prefs.set("filter", i);
         rebuildRows();
     });
+    std::function<void()> syncSettings;  // keeps an open Settings window in step
     std::unique_ptr<Monitor> monitor;
+    std::function<void()> openSettings;
     Menu viewMenu("View", {});
     std::function<void()> rebuildViewMenu = [&] {
         auto every = [&](double seconds, const char* label) {
             MenuItem item(label, [&, seconds] {
                 monitor->setInterval(seconds);
+                prefs.set("interval", seconds);
                 rebuildViewMenu();
+                if (syncSettings) syncSettings();
             });
             item.checked = monitor && std::abs(monitor->interval() - seconds) < 0.01;
             return item;
@@ -610,16 +617,21 @@ int main() {
                                     every(5, "Update Every 5 Seconds"), MenuItem::separator()};
         MenuItem kernel("Show Kernel Threads", [&] {
             showKernel = !showKernel;
+            prefs.set("showKernelThreads", showKernel);
             rebuildViewMenu();
             rebuildRows();
+            if (syncSettings) syncSettings();
         });
         kernel.checked = showKernel;
         items.push_back(kernel);
+        items.push_back(MenuItem::separator());
+        items.push_back(MenuItem("Settings…", [&] { openSettings(); }).withIcon(Icon::Gear).withShortcut("Ctrl+,"));
         viewMenu.setItems(std::move(items));
     };
 
     auto tabs = SegmentedControl({"CPU", "Memory", "Disk", "Network"}).onChange([&](int i) {
         tab = static_cast<Tab>(i);
+        prefs.set("tab", i);
         model->columns = columnsFor(tab, model->memTotal);
         model->sortColumn = 1;
         model->descending = true;
@@ -646,6 +658,10 @@ int main() {
             tabs->setSelected(i, true);
             return true;
         }
+        if (e.primary() && e.key == Key::Comma) {
+            openSettings();
+            return true;
+        }
         if (e.primary() && e.key == Key::F) {
             return true;  // search field focus would go here; Tab reaches it too
         }
@@ -661,9 +677,60 @@ int main() {
         stopButton.setDisabled(model->selected <= 0);
         infoButton.setDisabled(model->selected <= 0);
     });
-    rebuildViewMenu();
+    monitor->setInterval(std::clamp(prefs.getDouble("interval", 2.0), 1.0, 5.0));
 
-    // MAYO_DEMO=memory|disk|network selects a tab at startup (screenshots); inspect opens the inspector.
+    // Settings window (Ctrl+,) ------------------------------------------------------------------------
+    Window* settingsWindow = nullptr;
+    openSettings = [&] {
+        if (settingsWindow) {
+            settingsWindow->raise();
+            return;
+        }
+        auto& w = app.createWindow({.title = "Task Manager Settings", .width = 540, .height = 470, .minWidth = 460, .minHeight = 320});
+        constexpr double kIntervals[] = {1, 2, 5};
+        auto intervalIndex = [&] {
+            const double now = monitor->interval();
+            return now < 1.5 ? 0 : now < 3.5 ? 1 : 2;
+        };
+        auto interval = Picker({"Every Second", "Every 2 Seconds", "Every 5 Seconds"}, intervalIndex()).onChange([&](int i) {
+            monitor->setInterval(kIntervals[i]);
+            prefs.set("interval", kIntervals[i]);
+            rebuildViewMenu();
+        });
+        auto kernel = Toggle("", showKernel).onChange([&](bool on) {
+            showKernel = on;
+            prefs.set("showKernelThreads", on);
+            rebuildViewMenu();
+            rebuildRows();
+        });
+        auto form = Form({
+            AppearanceSettings(app),
+            FormSection("Monitoring", {FormRow("Update frequency", interval, "Sampling more often costs a little CPU"),
+                                       FormRow("Show kernel threads", kernel)}),
+        });
+        w.setContent(ScrollView(VStack({form}).padding(Insets(12, 24, 24, 24))));
+        w.onKey([&w](const KeyEvent& e) {
+            if (e.key == Key::Escape || (e.primary() && e.key == Key::W)) {
+                w.close();
+                return true;
+            }
+            return false;
+        });
+        syncSettings = [&, interval, kernel, intervalIndex]() mutable {
+            interval->setSelected(intervalIndex());
+            kernel.isOn(showKernel);
+        };
+        w.onClosed([&] {
+            settingsWindow = nullptr;
+            syncSettings = nullptr;
+        });
+        settingsWindow = &w;
+    };
+    rebuildViewMenu();
+    if (const int saved = std::clamp(prefs.getInt("tab"), 0, 3); saved != 0) tabs->setSelected(saved, true);
+
+    // MAYO_DEMO=memory|disk|network selects a tab at startup (screenshots); inspect opens the inspector;
+    // settings opens the Settings window.
     if (const char* env = std::getenv("MAYO_DEMO")) {
         std::string demo = env;
         app.after(0.2, [&, demo] {
@@ -671,6 +738,7 @@ int main() {
             if (demo == "disk") tabs->setSelected(2, true);
             if (demo == "network") tabs->setSelected(3, true);
         });
+        if (demo == "settings") app.after(0.3, [&] { openSettings(); });
         if (demo == "inspect" || demo == "quit")
             app.after(2.6, [&, demo] {
                 if (model->rows.empty()) return;

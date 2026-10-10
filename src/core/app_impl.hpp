@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,8 +17,14 @@ namespace mayo {
 struct App::Impl {
     std::vector<std::unique_ptr<Window>> windows;
     Theme theme;
-    Appearance appearance = Appearance::Light;
-    Color accent = Theme::defaultAccent();
+    std::string name;
+    std::unique_ptr<Settings> settings;
+    bool settingsSavePending = false;
+    Appearance appearance = Appearance::Light;  // effective
+    AppearanceMode defaultMode = AppearanceMode::System;
+    std::optional<Appearance> envAppearance;     // MAYO_APPEARANCE: wins, never saved
+    Color accent = Theme::defaultAccent();       // effective
+    std::optional<Color> systemAccent;           // last value read from the desktop
     bool running = false;
     bool trimPending = false;  // work happened since the heap was last returned to the OS
     struct Timer {
@@ -44,6 +51,10 @@ struct App::Impl {
     Impl();
     ~Impl();
     void rebuildTheme();
+    /// Re-reads the desktop preferences and the saved choices, and rebuilds the theme if anything changed.
+    void refreshAppearance(bool rereadAccent);
+    [[nodiscard]] AppearanceMode mode() const;
+    [[nodiscard]] bool followsSystemAccent() const;
     void dispatch(const platform::PlatformEvent& event);
     [[nodiscard]] double nextDeadline() const;  // absolute time; <0 = none
     void renderDueWindows();

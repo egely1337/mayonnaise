@@ -160,6 +160,12 @@ void EventDispatcher::scroll(const ScrollEvent& e) {
     refreshHover();
 }
 
+void EventDispatcher::magnify(const MagnifyEvent& e) {
+    for (Widget* w = hitTest(e.position); w; w = w->parent()) {
+        if (w->isEnabled() && w->onMagnify(e)) break;
+    }
+}
+
 void EventDispatcher::keyDown(const KeyEvent& e) {
     auto f = lock(focused());
     Widget* start = f ? f.get() : (!m_overlays.empty() ? m_overlays.back().get() : m_root.get());
@@ -170,6 +176,7 @@ void EventDispatcher::keyDown(const KeyEvent& e) {
         focusNext(e.shift());
         return;
     }
+    if (m_overlays.empty() && onUnhandledKey && onUnhandledKey(e)) return;
     if (e.key == Key::Escape && !m_overlays.empty()) {
         auto top = m_overlays.back();
         if (onOverlayDismissed) onOverlayDismissed(top.get());

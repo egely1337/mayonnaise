@@ -98,6 +98,8 @@ public:
     Sidebar& selectionStyle(SidebarSelectionStyle s) { return apply([&](SidebarView& n) { n.setSelectionStyle(s); }); }
     Sidebar& header(const Element& e) { return apply([&](SidebarView& n) { n.setHeader(e.widget()); }); }
     void select(const std::string& id) { m_node->setSelection(id, true); }
+    void setItems(std::vector<SidebarItem> items) { m_node->setItems(std::move(items)); }
+    [[nodiscard]] const std::string& selected() const { return m_node->selection(); }
 };
 
 }  // namespace mayo

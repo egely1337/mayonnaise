@@ -13,7 +13,7 @@ enum class Icon : std::uint16_t {
     Magnifier, Gear, Sidebar, Info, Bell, Person, PersonCircle, Wifi, Bluetooth, Globe,
     Moon, Sun, Lock, Paintbrush, Display, Battery, Speaker, Heart, Star, Folder, Document,
     Trash, Share, House, Clock, Hand, Keyboard, Photo, Square, Circle, Grid, List, Bolt,
-    Cloud, Envelope, Calendar, Pencil,
+    Cloud, Envelope, Calendar, Pencil, HeartFill, Import, ZoomIn, ZoomOut,
 };
 
 }  // namespace mayo

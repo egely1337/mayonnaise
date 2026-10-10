@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "color.hpp"
 #include "theme.hpp"
@@ -20,6 +21,11 @@ struct WindowOptions {
     bool resizable = true;
 };
 
+struct FileFilter {
+    std::string name;     ///< "Images"
+    std::string pattern;  ///< "png;jpg;jpeg" (semicolon separated extensions, "*" for all)
+};
+
 /// Owns the event loop, the windows, and the global appearance. Create exactly one.
 class App {
 public:
@@ -35,10 +41,15 @@ public:
     int run();
     void quit(int exitCode = 0);
 
-    /// Runs `fn` on the UI thread at the next loop iteration.
+    /// Runs `fn` on the UI thread at the next loop iteration. Safe to call from any thread.
     void post(std::function<void()> fn);
     /// Runs `fn` on the UI thread after `seconds`.
     void after(double seconds, std::function<void()> fn);
+
+    /// Native "Open" dialog. `done` runs on the UI thread with the chosen paths (empty if cancelled).
+    void openFiles(const std::vector<FileFilter>& filters, bool multiple,
+                   std::function<void(std::vector<std::string>)> done, Window* parent = nullptr);
+    void openFolder(std::function<void(std::vector<std::string>)> done, Window* parent = nullptr);
 
     void setAppearance(Appearance appearance);
     [[nodiscard]] Appearance appearance() const;

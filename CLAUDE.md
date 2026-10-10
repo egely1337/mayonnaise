@@ -26,6 +26,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/hello/hello
 ./build/examples/gallery/gallery
 ./build/examples/settings_app/settings_app
+./build/examples/photos/photos <images or folders...>
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -36,8 +37,8 @@ MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery
 
 Useful environment variables:
 - `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
-- `MAYO_DEMO=picker|menu|popover` (gallery) / `MAYO_DEMO=scroll` (settings_app) — open a popup or scroll at
-  startup for screenshots.
+- `MAYO_DEMO=picker|menu|popover|<page>` (gallery) / `MAYO_DEMO=scroll` (settings_app) /
+  `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) — drive the examples at startup for screenshots.
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
 - `MAYO_SCALE=<float>` — override the UI scale factor (HiDPI testing).
@@ -157,10 +158,24 @@ Known issues / next steps:
   Cheap (no stencil, no batch breaks) and correct for the UI case of rect clips nested in rounded panels.
 - **Overlays (menus, popovers) are measured at their ideal size** (`{inf, inf}`), then clamped to the window, so
   expanding content (spacers) doesn't stretch them to full width.
+- **Photos example** uses custom `Widget` subclasses (grid, viewer, page container) rather than new library
+  widgets: it doubles as the reference for writing custom widgets. A custom detail container opts into
+  running under the toolbar with `extendsIntoTitleBar()`.
 - **Extra components beyond the brief**: `Form`/`FormSection`/`FormRow` (System Settings cards), `Picker`,
   `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
 ## Gotchas
+
+- **File dialogs answer on SDL's terms** (portal reply during event pumping, zenity on a helper thread);
+  `App::openFiles` always hops back with `post()`, which is why `post()`/`after()` are mutex-protected.
+- **ImageData is CPU-only until first draw.** Decode on any thread, create textures only on the UI thread;
+  viewer-sized images call `setRetainPixels(false)` so the CPU copy is freed after upload.
+- **stb_image ignores EXIF orientation**; `render::decodeImage` parses the JPEG APP1 tag itself. Phone photos
+  come out sideways without it.
+- **ThreadSanitizer** reports dozens of races inside uninstrumented glib (SDL_Init → IBus/DBus) and Mesa's
+  shader threads. Filter for our symbols (Loader, post, decode) — those paths are clean.
+- **There is no "drag left the window" event**, so the drop highlight times out 0.3 s after the last
+  DROP_POSITION.
 
 - **Measure overlays with infinite space.** Proposing the window size made a popover containing a `Spacer`
   as wide as the window.

@@ -32,6 +32,11 @@ struct Window::Impl final : WidgetHost {
     double tooltipSince = 0;
     Point pointer;
 
+    // File drag & drop.
+    std::function<void(const std::vector<std::string>&)> dropHandler;
+    std::vector<std::string> pendingDrops;
+    double dropHoverUntil = -1;
+
     explicit Impl(const platform::WindowConfig& config);
     ~Impl() override;
     void handleEvent(const platform::PlatformEvent& event);
@@ -41,6 +46,7 @@ struct Window::Impl final : WidgetHost {
     [[nodiscard]] double nextDeadline() const;
     [[nodiscard]] platform::HitRegion hitRegion(Point p);
     void drawTooltip(Painter& painter);
+    void drawDropHighlight(Painter& painter);
     void updateCursor();
 
     // WidgetHost

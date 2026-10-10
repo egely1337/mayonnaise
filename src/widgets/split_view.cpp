@@ -106,7 +106,9 @@ void SplitViewView::arrangeContent(const Rect& content) {
     // scroll-edge glass has something to blur; other content simply starts below the bar.
     auto* scroller = dynamic_cast<ScrollViewView*>(m_detail.get());
     if (scroller) scroller->setContentInsetTop(barH);
-    Rect detail = Rect::fromLTRB(std::max(content.x, detailX), content.y + (scroller ? 0.0f : barH), content.right(),
+    // Custom detail containers can opt in via extendsIntoTitleBar() and inset themselves.
+    const bool underBar = scroller || (m_detail && m_detail->extendsIntoTitleBar());
+    Rect detail = Rect::fromLTRB(std::max(content.x, detailX), content.y + (underBar ? 0.0f : barH), content.right(),
                                  content.bottom());
     if (m_detail) {
         m_detail->measure(detail.size());

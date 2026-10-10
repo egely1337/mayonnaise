@@ -285,6 +285,30 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.line(6.5f, 2.5f, 6.5f, 5);
             pen.line(13.5f, 2.5f, 13.5f, 5);
             break;
+        case Icon::HeartFill: {
+            // Two lobes plus a scanline-filled wedge (no polygon primitive needed at icon sizes).
+            pen.dot(6.6f, 7.8f, 4.0f);
+            pen.dot(13.4f, 7.8f, 4.0f);
+            const float step = 0.5f;
+            for (float y = 7.8f; y <= 16.6f; y += step) {
+                float t = (y - 7.8f) / (16.6f - 7.8f);
+                float half = 7.6f * (1.0f - t);
+                pen.p.drawLine(pen.at(10 - half, y), pen.at(10 + half, y), color, step * u * 1.6f);
+            }
+            break;
+        }
+        case Icon::Import:
+            pen.line(10, 2.5f, 10, 12.5f);
+            pen.poly({{6.5f, 9}, {10, 12.5f}, {13.5f, 9}});
+            pen.poly({{3, 12}, {3, 17}, {17, 17}, {17, 12}});
+            break;
+        case Icon::ZoomIn:
+        case Icon::ZoomOut:
+            pen.circle(8.5f, 8.5f, 5.8f);
+            pen.line(12.8f, 12.8f, 17, 17);
+            pen.line(6, 8.5f, 11, 8.5f);
+            if (icon == Icon::ZoomIn) pen.line(8.5f, 6, 8.5f, 11);
+            break;
         case Icon::Pencil:
             pen.poly({{13.5f, 3}, {17, 6.5f}, {7, 16.5f}, {3, 17}, {3.5f, 13}}, true);
             pen.line(11.5f, 5, 15, 8.5f);

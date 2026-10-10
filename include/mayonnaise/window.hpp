@@ -1,8 +1,11 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "events.hpp"
 #include "geometry.hpp"
 
 namespace mayo {
@@ -19,6 +22,10 @@ public:
     void setContent(const Element& content);
     /// Toolbar items shown in the unified title bar (typically a mayo::Toolbar).
     void setToolbar(const Element& toolbar);
+    /// Accept files dragged onto the window. While files hover, the window shows a drop highlight.
+    void onFilesDropped(std::function<void(const std::vector<std::string>&)> handler);
+    /// Keys no widget handled (app-wide shortcuts). Return true if consumed.
+    void onKey(std::function<bool(const KeyEvent&)> handler);
     void setTitle(const std::string& title);
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;

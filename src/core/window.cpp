@@ -41,6 +41,14 @@ void Window::setToolbar(const Element& toolbar) {
 
 float Window::Impl::titleBarHeight() const { return root->titleBarHeight(); }
 
+void Window::onKey(std::function<bool(const KeyEvent&)> handler) {
+    m_impl->dispatcher.onUnhandledKey = std::move(handler);
+}
+
+void Window::onFilesDropped(std::function<void(const std::vector<std::string>&)> handler) {
+    m_impl->dropHandler = std::move(handler);
+}
+
 void Window::setTitle(const std::string& title) {
     m_impl->title = title;
     m_impl->platformWindow->setTitle(title);
@@ -225,6 +233,29 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
             break;
         }
         case EventType::TextInput: dispatcher.textInput(TextInputEvent{event.text}); break;
+        case EventType::Pinch:
+            hideTooltip();
+            dispatcher.magnify(MagnifyEvent{pointer, event.scale});
+            break;
+        case EventType::DropPosition:
+            if (dropHandler) {
+                // There's no "drag left" event, so the highlight times out unless refreshed.
+                dropHoverUntil = platform::Platform::now() + 0.3;
+                scheduleFrame(dropHoverUntil + 0.01);
+                requestRedraw();
+            }
+            break;
+        case EventType::DropFile:
+            if (!event.text.empty()) pendingDrops.push_back(event.text);
+            break;
+        case EventType::DropComplete: {
+            dropHoverUntil = -1;
+            requestRedraw();
+            auto files = std::move(pendingDrops);
+            pendingDrops.clear();
+            if (dropHandler && !files.empty()) dropHandler(files);
+            break;
+        }
         default: break;
     }
 }
@@ -269,6 +300,16 @@ void Window::Impl::drawTooltip(Painter& p) {
     p.popOpacity();
 }
 
+void Window::Impl::drawDropHighlight(Painter& p) {
+    if (dropHoverUntil < 0 || frameTime > dropHoverUntil) return;
+    const Theme& t = theme();
+    Size s = platformWindow->sizeInPoints();
+    Rect r = Rect{0, 0, s.width, s.height}.inset(4);
+    float radius = std::max(4.0f, root->windowRadius() - 4);
+    p.fillRoundedRect(r, radius, t.colors.accent.withAlpha(0.08f));
+    p.strokeRoundedRect(r, radius, t.colors.accent, 3);
+}
+
 void Window::Impl::render() {
     needsFrame = false;
     wakeAt = -1;
@@ -300,6 +341,7 @@ void Window::Impl::render() {
         root->paint(painter);
         for (auto& overlay : dispatcher.overlays()) overlay->paint(painter);
         drawTooltip(painter);
+        drawDropHighlight(painter);
         root->paintWindowFrame(painter);
     }
     r.endFrame();

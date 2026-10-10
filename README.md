@@ -12,6 +12,22 @@ No GTK, no Qt — just SDL3 for windows and input. Linux (X11 and Wayland) for n
 | **Menus over content** | **Content scrolling under the toolbar** |
 | ![](docs/screenshots/menu.png) | ![](docs/screenshots/settings-dark.png) |
 
+### Photos example
+
+`examples/photos` is a small image library and viewer: import images or whole folders (toolbar,
+Ctrl+O / Ctrl+Shift+O, drag & drop onto the window, or command-line arguments), browse a thumbnail grid
+(pinch or Ctrl+scroll to resize), mark favourites, search by name, and open a photo to zoom and pan
+(pinch, wheel, double-click for 100%, two-finger swipe or arrows for next/previous). Thumbnails are decoded
+on worker threads; JPEG EXIF orientation is honoured.
+
+```sh
+./build/examples/photos/photos ~/Pictures
+```
+
+| Library | Viewer |
+|---|---|
+| ![](docs/screenshots/photos-library.png) | ![](docs/screenshots/photos-viewer.png) |
+
 ## Hello World
 
 ```cpp
@@ -136,8 +152,13 @@ mayo::HStack({ name, save }).spacing(8).padding(12)
   `.maxWidth()`, `.padding()` constrain any widget. Stacks default to top-leading alignment.
 - Common modifiers: `.padding()`, `.frame()`, `.foreground()`, `.background(Color | Material)`,
   `.cornerRadius()`, `.disabled()`, `.hidden()`, `.opacity()`, `.tooltip()`.
-- App: `app.setAppearance()`, `app.setAccentColor()`, `app.after(seconds, fn)`, `app.post(fn)`.
-- Window: `setContent()`, `setToolbar(mayo::Toolbar({...}))`, `setTitle()`.
+- App: `app.setAppearance()`, `app.setAccentColor()`, `app.after(seconds, fn)`, `app.post(fn)` (thread-safe),
+  `app.openFiles(filters, multiple, done)` / `app.openFolder(done)` (native dialogs via the xdg portal).
+- Window: `setContent()`, `setToolbar(mayo::Toolbar({...}))`, `setTitle()`, `onFilesDropped(fn)`,
+  `onKey(fn)` for app-wide shortcuts.
+- Images: `mayo::ImageData::load(path, maxDimension)` decodes off the UI thread (PNG, JPEG with EXIF
+  orientation, GIF, BMP, TGA); `mayo::Image(data).contentMode(ContentMode::Fill)` displays it.
+- Touchpad pinch arrives as `Widget::onMagnify(const MagnifyEvent&)`.
 - Custom drawing: `mayo::Canvas([](mayo::Painter& p, mayo::Rect r) { p.fillCircle(r.center(), 8, c); })`.
 - Custom widgets: subclass `mayo::Widget` (override `measureContent`, `arrangeContent`, `draw`, and the
   `onPointer…` / `onKey…` handlers), then use it with `mayo::Custom<MyWidget>(args...)` to get the

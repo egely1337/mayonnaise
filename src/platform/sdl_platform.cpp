@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <unordered_map>
 
 #include "platform.hpp"
@@ -320,6 +321,21 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
             out.modifiers = translateMods(e.key.mod);
             out.repeat = e.key.repeat;
             return true;
+        case SDL_EVENT_DROP_FILE:
+        case SDL_EVENT_DROP_POSITION:
+        case SDL_EVENT_DROP_COMPLETE:
+            out.type = e.type == SDL_EVENT_DROP_FILE       ? EventType::DropFile
+                       : e.type == SDL_EVENT_DROP_POSITION ? EventType::DropPosition
+                                                           : EventType::DropComplete;
+            out.window = e.drop.windowID;
+            out.position = toPoints(e.drop.windowID, e.drop.x, e.drop.y);
+            out.text = e.drop.data ? e.drop.data : "";
+            return true;
+        case SDL_EVENT_PINCH_UPDATE:
+            out.type = EventType::Pinch;
+            out.window = e.pinch.windowID;
+            out.scale = e.pinch.scale;
+            return true;
         case SDL_EVENT_TEXT_INPUT:
             out.type = EventType::TextInput;
             out.window = e.text.windowID;
@@ -394,6 +410,41 @@ std::string Platform::clipboardText() {
 void Platform::setClipboardText(const std::string& text) { SDL_SetClipboardText(text.c_str()); }
 
 float Platform::doubleClickTime() { return 0.5f; }
+
+namespace {
+struct DialogRequest {
+    std::vector<std::string> names;
+    std::vector<std::string> patterns;
+    std::vector<SDL_DialogFileFilter> filters;  // points into names/patterns; must outlive the dialog
+    std::function<void(std::vector<std::string>)> done;
+};
+
+void SDLCALL dialogCallback(void* userdata, const char* const* files, int /*filter*/) {
+    std::unique_ptr<DialogRequest> req(static_cast<DialogRequest*>(userdata));
+    std::vector<std::string> out;
+    if (!files) SDL_Log("mayonnaise: file dialog failed: %s", SDL_GetError());
+    for (const char* const* f = files; f && *f; ++f) out.emplace_back(*f);
+    if (req->done) req->done(std::move(out));
+}
+}  // namespace
+
+void Platform::showOpenDialog(PlatformWindow* parent, const std::vector<DialogFilter>& filters, bool folders,
+                              bool multiple, std::function<void(std::vector<std::string>)> done) {
+    auto req = std::make_unique<DialogRequest>();
+    req->done = std::move(done);
+    for (const auto& f : filters) {
+        req->names.push_back(f.name);
+        req->patterns.push_back(f.pattern);
+    }
+    for (size_t i = 0; i < filters.size(); ++i) req->filters.push_back({req->names[i].c_str(), req->patterns[i].c_str()});
+    SDL_Window* win = parent ? parent->impl().window : nullptr;
+    DialogRequest* raw = req.release();  // owned by the callback from here on
+    if (folders)
+        SDL_ShowOpenFolderDialog(dialogCallback, raw, win, nullptr, multiple);
+    else
+        SDL_ShowOpenFileDialog(dialogCallback, raw, win, raw->filters.data(), static_cast<int>(raw->filters.size()),
+                               nullptr, multiple);
+}
 
 PlatformWindow* Platform::windowFromId(WindowId id) {
     auto it = g_windows.find(id);

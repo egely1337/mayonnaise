@@ -16,10 +16,30 @@ bool glContextAlive();
 
 struct ImageData::Impl {
     render::DecodedImage pixels;
+    int originalW = 0;
+    int originalH = 0;
+    bool retain = true;
+
+    void fit(int maxDim) {
+        originalW = pixels.width;
+        originalH = pixels.height;
+        if (maxDim <= 0 || (pixels.width <= maxDim && pixels.height <= maxDim)) return;
+        float k = static_cast<float>(maxDim) / static_cast<float>(std::max(pixels.width, pixels.height));
+        render::resizeBox(pixels, std::max(1, static_cast<int>(static_cast<float>(pixels.width) * k + 0.5f)),
+                          std::max(1, static_cast<int>(static_cast<float>(pixels.height) * k + 0.5f)));
+    }
     GLuint texture = 0;
 
     GLuint textureId() {
         if (texture || pixels.pixels.empty()) return texture;
+        // Clamp to what the GPU can sample (rare: > 16k photos).
+        GLint maxSize = 4096;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
+        if (pixels.width > maxSize || pixels.height > maxSize) {
+            float k = static_cast<float>(maxSize) / static_cast<float>(std::max(pixels.width, pixels.height));
+            render::resizeBox(pixels, static_cast<int>(static_cast<float>(pixels.width) * k),
+                              static_cast<int>(static_cast<float>(pixels.height) * k));
+        }
         glGenTextures(1, &texture);
         glBindTexture(GL_TEXTURE_2D, texture);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -30,6 +50,10 @@ struct ImageData::Impl {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (!retain) {
+            pixels.pixels.clear();
+            pixels.pixels.shrink_to_fit();
+        }
         return texture;
     }
 };
@@ -40,15 +64,32 @@ ImageData::~ImageData() {
     if (m_impl->texture && render::glContextAlive()) glDeleteTextures(1, &m_impl->texture);
 }
 
-std::shared_ptr<ImageData> ImageData::load(const std::string& path) {
+std::shared_ptr<ImageData> ImageData::load(const std::string& path, int maxDimension) {
     std::shared_ptr<ImageData> img(new ImageData());
     if (!render::loadImageFile(path, img->m_impl->pixels)) return nullptr;
+    img->m_impl->fit(maxDimension);
     return img;
 }
+
+void ImageData::setRetainPixels(bool retain) { m_impl->retain = retain; }
+
+std::shared_ptr<ImageData> ImageData::scaledToFit(int maxDimension) const {
+    if (m_impl->pixels.pixels.empty()) return nullptr;
+    std::shared_ptr<ImageData> img(new ImageData());
+    img->m_impl->pixels = m_impl->pixels;
+    img->m_impl->fit(maxDimension);
+    img->m_impl->originalW = m_impl->originalW;
+    img->m_impl->originalH = m_impl->originalH;
+    return img;
+}
+
+int ImageData::originalWidth() const { return m_impl->originalW; }
+int ImageData::originalHeight() const { return m_impl->originalH; }
 
 std::shared_ptr<ImageData> ImageData::decode(std::span<const std::uint8_t> encoded) {
     std::shared_ptr<ImageData> img(new ImageData());
     if (!render::decodeImage(encoded, img->m_impl->pixels)) return nullptr;
+    img->m_impl->fit(0);
     return img;
 }
 
@@ -64,6 +105,7 @@ std::shared_ptr<ImageData> ImageData::fromPixels(int width, int height, std::spa
         unsigned a = d.pixels[i + 3];
         for (size_t c = 0; c < 3; ++c) d.pixels[i + c] = static_cast<std::uint8_t>((d.pixels[i + c] * a + 127) / 255);
     }
+    img->m_impl->fit(0);
     return img;
 }
 

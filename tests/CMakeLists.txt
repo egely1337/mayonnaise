@@ -1,5 +1,6 @@
-add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp)
-target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest)
+add_executable(mayonnaise_tests test_main.cpp test_geometry.cpp test_text.cpp test_layout.cpp test_events.cpp test_widgets.cpp test_images.cpp)
+target_link_libraries(mayonnaise_tests PRIVATE mayonnaise::mayonnaise doctest::doctest mayonnaise_stb)
+# The library already compiles stb_image_write's implementation; tests only use the declarations.
 target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 mayonnaise_set_warnings(mayonnaise_tests)
 # doctest's registration macros use __COUNTER__, which recent Clang flags under -Wpedantic.

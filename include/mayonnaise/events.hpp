@@ -47,6 +47,12 @@ struct ScrollEvent {
     Modifiers modifiers = Modifiers::None;
 };
 
+/// Touchpad pinch. `scale` is the change since the previous event (>1 = zoom in).
+struct MagnifyEvent {
+    Point position;
+    float scale = 1;
+};
+
 struct KeyEvent {
     Key key = Key::Unknown;
     Modifiers modifiers = Modifiers::None;

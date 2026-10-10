@@ -27,6 +27,7 @@ public:
     void pointerUp(const PointerEvent& e);
     void pointerLeave();
     void scroll(const ScrollEvent& e);
+    void magnify(const MagnifyEvent& e);
     void keyDown(const KeyEvent& e);
     void textInput(const TextInputEvent& e);
 
@@ -45,6 +46,8 @@ public:
 
     /// Called before an overlay is dismissed so callers can run its dismissal callback.
     std::function<void(Widget*)> onOverlayDismissed;
+    /// Keys nobody in the tree handled.
+    std::function<bool(const KeyEvent&)> onUnhandledKey;
 
 private:
     [[nodiscard]] bool attached(const Widget* w) const;

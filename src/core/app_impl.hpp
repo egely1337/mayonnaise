@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@ struct App::Impl {
         std::function<void()> fn;
     };
     std::vector<Timer> timers;
+    std::mutex timersMutex;  // post() may be called from worker threads
     void runDueTimers();
     std::unique_ptr<render::Renderer2D> renderer;  // shared by all windows (one GL context)
     std::unique_ptr<render::TextSystem> text;

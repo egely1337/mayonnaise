@@ -190,6 +190,7 @@ public:
     virtual void onPointerEnter() {}
     virtual void onPointerLeave() {}
     virtual bool onScroll(const ScrollEvent& /*e*/) { return false; }
+    virtual bool onMagnify(const MagnifyEvent& /*e*/) { return false; }
     virtual bool onKeyDown(const KeyEvent& /*e*/) { return false; }
     virtual bool onTextInput(const TextInputEvent& /*e*/) { return false; }
     virtual void onFocusChanged(bool /*focused*/) {}

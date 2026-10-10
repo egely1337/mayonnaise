@@ -52,18 +52,24 @@ void App::Impl::dispatch(const platform::PlatformEvent& event) {
 void App::Impl::runDueTimers() {
     double now = platform::Platform::now();
     std::vector<std::function<void()>> due;
-    std::erase_if(timers, [&](Timer& t) {
-        if (t.due > now) return false;
-        due.push_back(std::move(t.fn));
-        return true;
-    });
+    {
+        std::lock_guard lock(timersMutex);
+        std::erase_if(timers, [&](Timer& t) {
+            if (t.due > now) return false;
+            due.push_back(std::move(t.fn));
+            return true;
+        });
+    }
     for (auto& fn : due) fn();
 }
 
 double App::Impl::nextDeadline() const {
     double best = -1;
-    for (const auto& t : timers) {
-        if (best < 0 || t.due < best) best = t.due;
+    {
+        std::lock_guard lock(const_cast<std::mutex&>(timersMutex));
+        for (const auto& t : timers) {
+            if (best < 0 || t.due < best) best = t.due;
+        }
     }
     for (const auto& w : windows) {
         double d = w->impl().nextDeadline();
@@ -184,8 +190,36 @@ void App::quit(int exitCode) {
 void App::post(std::function<void()> fn) { after(0, std::move(fn)); }
 
 void App::after(double seconds, std::function<void()> fn) {
-    m_impl->timers.push_back({platform::Platform::now() + seconds, std::move(fn)});
+    {
+        std::lock_guard lock(m_impl->timersMutex);
+        m_impl->timers.push_back({platform::Platform::now() + seconds, std::move(fn)});
+    }
     platform::Platform::wake();
+}
+
+namespace {
+void showDialog(App& app, Window* parent, const std::vector<FileFilter>& filters, bool folders, bool multiple,
+                std::function<void(std::vector<std::string>)> done) {
+    std::vector<platform::DialogFilter> f;
+    for (const auto& x : filters) f.push_back({x.name, x.pattern});
+    platform::PlatformWindow* pw = parent ? parent->impl().platformWindow.get() : nullptr;
+    // The platform may answer on a helper thread; hop back to the UI thread.
+    platform::Platform::showOpenDialog(pw, f, folders, multiple,
+                                       [&app, done = std::move(done)](std::vector<std::string> paths) mutable {
+                                           app.post([done, paths = std::move(paths)] { done(paths); });
+                                       });
+}
+}  // namespace
+
+void App::openFiles(const std::vector<FileFilter>& filters, bool multiple,
+                    std::function<void(std::vector<std::string>)> done, Window* parent) {
+    if (!parent && !m_impl->windows.empty()) parent = m_impl->windows.front().get();
+    showDialog(*this, parent, filters, false, multiple, std::move(done));
+}
+
+void App::openFolder(std::function<void(std::vector<std::string>)> done, Window* parent) {
+    if (!parent && !m_impl->windows.empty()) parent = m_impl->windows.front().get();
+    showDialog(*this, parent, {}, true, false, std::move(done));
 }
 
 void App::setAppearance(Appearance appearance) {

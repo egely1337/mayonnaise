@@ -39,6 +39,8 @@ enum class EventType : std::uint8_t {
     WindowFocusGained, WindowFocusLost, WindowMaximized, WindowRestored, WindowMinimized,
     MouseMove, MouseDown, MouseUp, MouseLeave, Scroll,
     KeyDown, KeyUp, TextInput,
+    DropFile, DropPosition, DropComplete,
+    Pinch,
     Wake,
 };
 
@@ -53,7 +55,13 @@ struct PlatformEvent {
     Key key = Key::Unknown;
     Modifiers modifiers = Modifiers::None;
     bool repeat = false;
-    std::string text;
+    std::string text;      // text input, dropped file path
+    float scale = 1;       // pinch: scale change since the previous update
+};
+
+struct DialogFilter {
+    std::string name;
+    std::string pattern;  // "png;jpg;jpeg"
 };
 
 class PlatformWindow {
@@ -89,6 +97,7 @@ public:
     [[nodiscard]] float pointsPerWindowUnit() const;
 
     struct Impl;
+    [[nodiscard]] Impl& impl() { return *m_impl; }
 
 private:
     std::unique_ptr<Impl> m_impl;
@@ -115,6 +124,10 @@ public:
     static float doubleClickTime();  // seconds
 
     static PlatformWindow* windowFromId(WindowId id);
+    /// Native open dialog (xdg portal / zenity). `done` may run on another thread; an empty list means
+    /// the user cancelled.
+    static void showOpenDialog(PlatformWindow* parent, const std::vector<DialogFilter>& filters, bool folders,
+                               bool multiple, std::function<void(std::vector<std::string>)> done);
     /// Valid once the first window (and with it the shared GL context) exists.
     static void* glProcAddress(const char* name);
 };

@@ -12,8 +12,10 @@ namespace mayo {
 /// Decoded RGBA pixels plus a lazily created GPU texture. Share it between Image widgets freely.
 class ImageData {
 public:
-    /// PNG / JPEG / BMP / TGA from disk; nullptr on failure.
-    static std::shared_ptr<ImageData> load(const std::string& path);
+    /// PNG / JPEG / GIF (first frame) / BMP / TGA from disk; nullptr on failure. JPEG EXIF orientation is
+    /// applied. With `maxDimension > 0` the image is downscaled to fit (thumbnails). Pure CPU work, so it
+    /// is safe to call from a worker thread; the GPU texture is created on first draw.
+    static std::shared_ptr<ImageData> load(const std::string& path, int maxDimension = 0);
     static std::shared_ptr<ImageData> decode(std::span<const std::uint8_t> encoded);
     /// Straight-alpha RGBA8, row-major, top row first.
     static std::shared_ptr<ImageData> fromPixels(int width, int height, std::span<const std::uint8_t> rgba);
@@ -24,6 +26,13 @@ public:
 
     [[nodiscard]] int width() const;
     [[nodiscard]] int height() const;
+    /// Size before any downscaling in load()/scaledToFit().
+    [[nodiscard]] int originalWidth() const;
+    [[nodiscard]] int originalHeight() const;
+    /// A downscaled copy fitting in maxDimension x maxDimension (CPU, thread-safe).
+    [[nodiscard]] std::shared_ptr<ImageData> scaledToFit(int maxDimension) const;
+    /// Free the CPU copy once the texture is uploaded (large photos). scaledToFit() then returns nullptr.
+    void setRetainPixels(bool retain);
 
     struct Impl;
     [[nodiscard]] Impl& impl() const { return *m_impl; }

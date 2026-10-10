@@ -9,6 +9,10 @@
 
 namespace mayo {
 
+namespace render {
+void setGLContextAlive(bool alive);
+}
+
 namespace {
 App* g_app = nullptr;
 }

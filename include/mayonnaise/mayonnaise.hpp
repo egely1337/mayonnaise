@@ -18,6 +18,7 @@
 #include "widgets/button.hpp"
 #include "widgets/checkbox.hpp"
 #include "widgets/form.hpp"
+#include "widgets/image.hpp"
 #include "widgets/label.hpp"
 #include "widgets/menu.hpp"
 #include "widgets/popover.hpp"

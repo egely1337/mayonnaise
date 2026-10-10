@@ -8,7 +8,7 @@
 
 namespace mayo {
 
-class Image;
+class ImageData;
 enum class Icon : std::uint16_t;
 
 namespace render {
@@ -50,7 +50,9 @@ public:
     void drawMaterial(const Rect& r, const CornerRadii& radii, const MaterialStyle& style);
 
     // Images & icons -------------------------------------------------------------------------
-    void drawImage(const Rect& r, const Image& image, const CornerRadii& radii = {}, float opacity = 1);
+    /// Draws `image` stretched into `r` (sample `source`, in normalised 0..1 texture coordinates).
+    void drawImage(const Rect& r, const ImageData& image, const CornerRadii& radii = {}, float opacity = 1,
+                   const Rect& source = {0, 0, 1, 1});
     void drawIcon(Icon icon, const Rect& r, const Color& color, float weight = 1);
 
     // Text ------------------------------------------------------------------------------

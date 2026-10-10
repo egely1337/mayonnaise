@@ -54,7 +54,7 @@ int main() {
   `Checkbox`, `Slider`, `TextField` (+ secure and search styles), `SegmentedControl`, `ProgressBar`
   (determinate / indeterminate / spinner), `Picker`, `Menu`, `Popover`, `Sidebar`, `SplitView`,
   `ScrollView` (wheel glide, touchpad momentum, rubber banding, overlay scrollbars), `Toolbar`,
-  `Form` / `FormSection` / `FormRow`, `Canvas`, and the `VStack` / `HStack` / `ZStack` / `Spacer` /
+  `Form` / `FormSection` / `FormRow`, `Image` (fit / fill / stretch), `Canvas`, and the `VStack` / `HStack` / `ZStack` / `Spacer` /
   `Divider` layout primitives.
 - **Theming**: light/dark appearance, configurable accent colour, semantic colours
   (`label`, `secondaryLabel`, `separator`, `controlBackground`, …), all from one `mayo::Theme`.

@@ -6,6 +6,14 @@
 
 #include "../platform/platform.hpp"
 
+namespace mayo::render {
+namespace {
+bool g_contextAlive = false;
+}
+bool glContextAlive() { return g_contextAlive; }
+void setGLContextAlive(bool alive) { g_contextAlive = alive; }
+}  // namespace mayo::render
+
 namespace mayo::gl {
 
 namespace {
@@ -42,6 +50,7 @@ GLuint compile(GLenum stage, std::string_view source, std::string_view name) {
 bool load() {
     int version = gladLoadGL(reinterpret_cast<GLADloadfunc>(&platform::Platform::glProcAddress));
     if (!version) return false;
+    render::setGLContextAlive(true);
     bool debugOutput = false;
 #ifndef NDEBUG
     if (GLAD_GL_KHR_debug) {

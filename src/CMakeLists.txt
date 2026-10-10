@@ -20,6 +20,7 @@ add_library(mayonnaise
   widgets/control.cpp
   widgets/form.cpp
   widgets/icons.cpp
+  widgets/image.cpp
   widgets/label.cpp
   widgets/menu.cpp
   widgets/popup.cpp

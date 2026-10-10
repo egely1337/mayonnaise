@@ -18,7 +18,7 @@ pkgname=(mayonnaise-git
          mayo-photos-git
          mayo-video-player-git
          mayo-system-settings-git)
-pkgver=0.1.0.r23.1f9dd63
+pkgver=0.1.0.r23.adc141f
 pkgrel=1
 pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3, and apps built with it'
 arch=(x86_64)

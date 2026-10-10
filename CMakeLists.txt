@@ -3,7 +3,11 @@ project(mayonnaise VERSION 0.1.0 LANGUAGES C CXX)
 
 set(MAYONNAISE_IS_TOP_LEVEL ${PROJECT_IS_TOP_LEVEL})
 
-option(MAYONNAISE_BUILD_EXAMPLES "Build Mayonnaise examples" ${MAYONNAISE_IS_TOP_LEVEL})
+option(MAYONNAISE_BUILD_APPS "Build the Mayonnaise applications (Finder, Terminal, ...)" ${MAYONNAISE_IS_TOP_LEVEL})
+# Older name, still honoured.
+if(DEFINED MAYONNAISE_BUILD_EXAMPLES)
+  set(MAYONNAISE_BUILD_APPS ${MAYONNAISE_BUILD_EXAMPLES})
+endif()
 option(MAYONNAISE_BUILD_TESTS "Build Mayonnaise tests" ${MAYONNAISE_IS_TOP_LEVEL})
 option(MAYONNAISE_USE_SYSTEM_DEPS "Require system packages for SDL3/FreeType/doctest instead of fetching" OFF)
 option(MAYONNAISE_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
@@ -22,8 +26,8 @@ include(Embed)
 add_subdirectory(third_party)
 add_subdirectory(src)
 
-if(MAYONNAISE_BUILD_EXAMPLES)
-  add_subdirectory(examples)
+if(MAYONNAISE_BUILD_APPS)
+  add_subdirectory(applications)
 endif()
 
 if(MAYONNAISE_BUILD_TESTS)

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Finder
+GenericName=File Manager
+Comment=Browse and manage files
+Exec=finder %f
+Icon=io.github.egely1337.Mayonnaise.Finder
+Terminal=false
+StartupNotify=true
+Categories=System;FileTools;FileManager;
+Keywords=files;folders;browser;trash;
+MimeType=inode/directory;

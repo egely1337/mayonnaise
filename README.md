@@ -14,32 +14,44 @@ No GTK, no Qt — just SDL3 for windows and input. Linux (X11 and Wayland) for n
 
 ### Photos example
 
-`examples/photos` is a small image library and viewer: import images or whole folders (toolbar,
+`applications/photos` is a small image library and viewer: import images or whole folders (toolbar,
 Ctrl+O / Ctrl+Shift+O, drag & drop onto the window, or command-line arguments), browse a thumbnail grid
 (pinch or Ctrl+scroll to resize), mark favourites, search by name, and open a photo to zoom and pan
 (pinch, wheel, double-click for 100%, two-finger swipe or arrows for next/previous). Thumbnails are decoded
 on worker threads; JPEG EXIF orientation is honoured.
 
 ```sh
-./build/examples/photos/photos ~/Pictures
+./build/applications/photos/photos ~/Pictures
 ```
 
 | Library | Viewer |
 |---|---|
 | ![](docs/screenshots/photos-library.png) | ![](docs/screenshots/photos-viewer.png) |
 
-### Video player example
+### Video player
 
-`examples/video_player` is a QuickTime-style player: the video runs under the title bar, a dark Liquid
+Without a file, `video_player` opens a **library**: a gallery of everything in your Videos folder (and folders
+you add), with Continue Watching (a progress bar shows where you left off), Recently Added, Recently Played,
+per-folder views and search. Thumbnails come from GNOME's thumbnail cache or are decoded in the background
+and cached. **Subtitles**: `.srt` and `.vtt` files named like the video (`Movie.srt`, `Movie.tr.srt`) load
+automatically in your language; drop more onto the window or use the captions button. Files that aren't
+UTF-8 are read in your language's Windows code page (Turkish Windows-1254 subtitles just work). C toggles
+subtitles, V switches tracks, G/H shift them by 0.1 s; size and background are in Settings.
+
+| Library | Subtitles |
+|---|---|
+| ![](docs/screenshots/video-library.png) | ![](docs/screenshots/video-subtitles.png) |
+
+The player itself is QuickTime-style: the video runs under the title bar, a dark Liquid
 Glass HUD floats at the bottom (play/pause, ±10 s, volume, loop, full screen, timeline with a time bubble)
 and the controls and title bar fade away after a few idle seconds. Decoding uses FFmpeg on background
 threads with audio as the master clock and frame-accurate seeking. Drop several files to queue them.
 
 ```sh
-./build/examples/video_player/video_player movie.mp4
+./build/applications/video_player/video_player movie.mp4
 ```
 
-Keys: Space/K play-pause · ←/→ 5 s · J/L 10 s · ↑/↓ volume · M mute · F full screen · Ctrl+O open.
+Keys: Space/K play-pause · ←/→ 5 s · J/L 10 s · ↑/↓ volume · M mute · F full screen · Esc library · Ctrl+O open.
 
 **Hardware decoding**: H.264, HEVC (incl. 10-bit), VP9 and AV1 decode on the GPU through VAAPI (AMD/Intel;
 CUDA, Vulkan and VDPAU are tried next). On VAAPI the decoded surface is shared with OpenGL as a dma-buf
@@ -54,7 +66,7 @@ on Ubuntu, `ffmpeg-free-devel` on Fedora); without them CMake simply skips this 
 
 ### Task manager example
 
-`examples/task_manager` is an Activity Monitor-style system monitor for Linux: CPU, Memory, Disk and Network
+`applications/task_manager` is an Activity Monitor-style system monitor for Linux: CPU, Memory, Disk and Network
 tabs, each with live history graphs (CPU load stacked by user/system, per-core bars, memory pressure,
 mirrored read/write and in/out graphs), volumes with capacity bars, network interfaces with addresses, and a
 sortable, resizable, searchable process table (filters: all / mine / other users / active). Double-click a
@@ -68,7 +80,7 @@ sockets per process; disk I/O per process is only readable for your own processe
 
 ### Terminal example
 
-`examples/terminal` is a terminal emulator in the style of macOS Terminal: xterm-256color with true colour,
+`applications/terminal` is a terminal emulator in the style of macOS Terminal: xterm-256color with true colour,
 the alternate screen, mouse reporting, bracketed paste and OSC titles / working directory / clipboard;
 scrollback that re-wraps when the window is resized; tabs; selection (double-click words, triple-click
 lines), Ctrl+click links, colour profiles (Basic follows light/dark, Pro, Homebrew, Ocean, Solarized) and the
@@ -76,7 +88,7 @@ system's monospace font with automatic fallbacks for CJK and symbols. Box drawin
 characters are drawn as geometry, so `btop` and friends look right.
 
 ```sh
-./build/examples/terminal/terminal ~/Projects
+./build/applications/terminal/terminal ~/Projects
 ```
 
 ![Terminal](docs/screenshots/terminal.png)
@@ -94,11 +106,11 @@ app.settings().set("wrapLines", false);                   // saved shortly after
 auto prefs = mayo::Form({mayo::AppearanceSettings(app)}); // Auto / Light / Dark + accent colour, live
 ```
 
-All examples have a Settings window (Ctrl+,).
+All applications have a Settings window (Ctrl+,).
 
 ### Finder example
 
-`examples/finder` is a file manager modelled on the macOS Finder: Icons, List (with disclosure triangles) and
+`applications/finder` is a file manager modelled on the macOS Finder: Icons, List (with disclosure triangles) and
 Columns views (Ctrl+1/2/3) with a preview pane, picture thumbnails and text "page" previews decoded in the
 background, Quick Look (Space), Get Info (Ctrl+I), inline rename (Enter), drag and drop between folders
 (hold Ctrl to copy), copy / cut / paste, Duplicate, Move to Trash with Put Back and Undo (Ctrl+Z), recursive
@@ -106,16 +118,16 @@ search, Go to Folder (Ctrl+Shift+G), a path bar, Recents, and folders that updat
 the freedesktop.org Trash, so items trashed here show up in other file managers too.
 
 ```sh
-./build/examples/finder/finder ~/Documents
+./build/applications/finder/finder ~/Documents
 ```
 
 | Icons | Columns (dark) |
 |---|---|
 | ![](docs/screenshots/finder.png) | ![](docs/screenshots/finder-columns-dark.png) |
 
-### System Settings example
+### System Settings
 
-`examples/system_settings` is a System Settings-style control centre for GNOME on GNU/Linux. It changes the
+`applications/system_settings` is a System Settings-style control centre for GNOME on GNU/Linux. It changes the
 real desktop: every panel reads and writes the same GSettings keys and D-Bus services as GNOME Settings and
 follows changes made elsewhere while it's open.
 
@@ -136,9 +148,9 @@ follows changes made elsewhere while it's open.
   and hostnamed (language, formats, time zone search, NTP, account picture and name, device name, hardware).
 
 ```sh
-./build/examples/system_settings/system_settings            # last panel
-./build/examples/system_settings/system_settings bluetooth  # like gnome-control-center bluetooth
-SETTINGS_READ_ONLY=1 ./build/examples/system_settings/system_settings   # look, never change anything
+./build/applications/system_settings/systemsettings            # last panel
+./build/applications/system_settings/systemsettings bluetooth  # like gnome-control-center bluetooth
+SETTINGS_READ_ONLY=1 ./build/applications/system_settings/systemsettings   # look, never change anything
 ```
 
 It needs GIO (`libglib2.0-dev` / `glib2-devel`) and is skipped without it. Missing services (no
@@ -148,6 +160,19 @@ failing.
 | Appearance (dark) | Displays (light) |
 |---|---|
 | ![](docs/screenshots/system-settings.png) | ![](docs/screenshots/system-settings-displays.png) |
+
+### Installing the apps (Arch Linux)
+
+`packaging/arch/PKGBUILD` builds a split package from the committed tree: `mayonnaise-git` (static library,
+headers, CMake package) and one package per app, plus `mayo-apps-git` for all of them. Apps install to
+`/usr/bin` as `finder`, `terminal`, `taskmanager`, `photos`, `video_player` and `systemsettings`, each with a
+desktop entry and a macOS-style icon:
+
+![App icons](docs/screenshots/app-icons.png)
+
+```sh
+cd packaging/arch && makepkg -si
+```
 
 ## Hello World
 
@@ -226,15 +251,14 @@ Then:
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-./build/examples/hello/hello
-./build/examples/gallery/gallery
-./build/examples/settings_app/settings_app
+./build/applications/finder/finder
+./build/applications/video_player/video_player
 ctest --test-dir build --output-on-failure
 ```
 
 | CMake option | Default | |
 |---|---|---|
-| `MAYONNAISE_BUILD_EXAMPLES` | `ON` (top level) | build `examples/` |
+| `MAYONNAISE_BUILD_EXAMPLES` | `ON` (top level) | build `applications/` |
 | `MAYONNAISE_BUILD_TESTS` | `ON` (top level) | build the doctest suite |
 | `MAYONNAISE_USE_SYSTEM_DEPS` | `OFF` | require system SDL3 / FreeType / doctest instead of falling back to fetching |
 | `MAYONNAISE_SANITIZE` | `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer |

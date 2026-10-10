@@ -121,7 +121,7 @@ public:
     }
     [[nodiscard]] float titleStart() const {
         float start = m_lights->frame().right() + 16;
-        if (fullSize && leadingEdge > 0) start = std::max(start, leadingEdge + 16);
+        if (fullSize && leadingEdge > 0) start = std::max(start, leadingEdge + 20);
         return start;
     }
 

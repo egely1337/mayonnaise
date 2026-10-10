@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Terminal
+GenericName=Terminal
+Comment=Use the command line
+Exec=terminal
+Icon=io.github.egely1337.Mayonnaise.Terminal
+Terminal=false
+StartupNotify=true
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;cmd;

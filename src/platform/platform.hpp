@@ -112,7 +112,8 @@ private:
 /// Process-wide platform services. Must be initialized before creating windows.
 class Platform {
 public:
-    static bool init();
+    /// `appId` names the .desktop file (Wayland app_id / X11 WM_CLASS) so docks show the right icon.
+    static bool init(const std::string& appId = {});
     static void shutdown();
 
     /// Blocks up to `timeoutSeconds` (negative = forever) for the next event.

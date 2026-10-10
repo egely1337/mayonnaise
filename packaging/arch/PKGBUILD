@@ -1,29 +1,32 @@
 # Maintainer: egely <egely1337@icloud.com>
 #
-# Builds from the git repository two directories up (whatever is committed on
-# its checked-out branch). Run `makepkg -s` here; install with `sudo pacman -U`.
+# Split package for Mayonnaise and its applications, built from the git repository two directories up
+# (whatever is committed on its checked-out branch):
+#
+#   cd packaging/arch && makepkg -si          # build, then install everything
+#   sudo pacman -U mayo-video-player-git-*.pkg.tar.zst   # or just one app
+#
+# Every application is a CMake install component, so each package is exactly
+# `cmake --install build --component <app>`: the binary in /usr/bin, its .desktop file and its icon.
 
 pkgbase=mayonnaise-git
 pkgname=(mayonnaise-git
+         mayo-apps-git
          mayo-finder-git
          mayo-terminal-git
          mayo-task-manager-git
          mayo-photos-git
-         mayo-video-player-git)
-pkgver=0.1.0.r20.1b26a70
+         mayo-video-player-git
+         mayo-system-settings-git)
+pkgver=0.1.0.r23.1f9dd63
 pkgrel=1
-pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3'
+pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3, and apps built with it'
 arch=(x86_64)
 url='https://github.com/egely1337/mayonnaise'
-license=(custom)
-makedepends=(git cmake sdl3 freetype2 ffmpeg)
-source=("mayonnaise::git+file://${startdir}/../.."
-        mayo-finder.desktop
-        mayo-terminal.desktop
-        mayo-task-manager.desktop
-        mayo-photos.desktop
-        mayo-video-player.desktop)
-sha256sums=(SKIP SKIP SKIP SKIP SKIP SKIP)
+license=(LicenseRef-custom OFL-1.1)
+makedepends=(git cmake pkgconf sdl3 freetype2 ffmpeg glib2 doctest)
+source=("mayonnaise::git+file://${startdir}/../..")
+sha256sums=(SKIP)
 
 pkgver() {
   cd mayonnaise
@@ -31,69 +34,100 @@ pkgver() {
 }
 
 build() {
-  # stb's asserts embed __FILE__; keep the build directory out of the binaries
+  # stb's asserts embed __FILE__; keep the build directory out of the binaries.
   CFLAGS+=" -ffile-prefix-map=$srcdir=."
   CXXFLAGS+=" -ffile-prefix-map=$srcdir=."
   cmake -B build -S mayonnaise \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DMAYONNAISE_USE_SYSTEM_DEPS=ON \
-    -DMAYONNAISE_BUILD_EXAMPLES=ON \
-    -DMAYONNAISE_BUILD_TESTS=OFF \
+    -DMAYONNAISE_BUILD_APPS=ON \
+    -DMAYONNAISE_BUILD_TESTS=ON \
     -Wno-dev
   cmake --build build -j"$(nproc)"
 }
 
+check() {
+  ctest --test-dir build --output-on-failure
+}
+
+# Installs one CMake component plus the Inter licence every app embeds.
+_install_component() {
+  DESTDIR="$pkgdir" cmake --install build --component "$1"
+  install -Dm644 mayonnaise/assets/fonts/Inter-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Inter-LICENSE.txt"
+}
+
+# The apps link the library statically. fontconfig (font fallbacks) and dbus (desktop accent colour) are
+# dlopen()ed at run time, so they are real dependencies even though nothing links them.
+_appdeps=(glibc gcc-libs sdl3 freetype2 fontconfig dbus hicolor-icon-theme)
+_dialogs='zenity: file dialogs without an xdg-desktop-portal'
+
 package_mayonnaise-git() {
-  pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3 (static library + headers)'
+  pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3 (static library, headers, CMake package)'
   depends=(sdl3 freetype2)
   provides=(mayonnaise)
   conflicts=(mayonnaise)
   options=(staticlibs)
-  DESTDIR="$pkgdir" cmake --install build
-  install -Dm644 mayonnaise/assets/fonts/Inter-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Inter-LICENSE.txt"
+  _install_component devel
 }
 
-# The apps link the library statically, so they don't depend on mayonnaise-git.
-# fontconfig and dbus are dlopen()ed at run time (font fallbacks, desktop accent colour).
-_app() { # <binary in build/examples> <installed name>
-  install -Dm755 "build/examples/$1/$1" "$pkgdir/usr/bin/$2"
-  install -Dm644 "$2.desktop" "$pkgdir/usr/share/applications/$2.desktop"
-  install -Dm644 mayonnaise/assets/fonts/Inter-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Inter-LICENSE.txt"
+package_mayo-apps-git() {
+  pkgdesc='All Mayonnaise applications'
+  depends=(mayo-finder-git mayo-terminal-git mayo-task-manager-git mayo-photos-git mayo-video-player-git
+           mayo-system-settings-git)
 }
-_appdeps=(sdl3 freetype2 fontconfig dbus)
 
 package_mayo-finder-git() {
   pkgdesc='macOS Finder-style file manager (Mayonnaise)'
   depends=("${_appdeps[@]}" xdg-utils)
-  optdepends=('zenity: file dialogs without an xdg-desktop-portal')
-  _app finder mayo-finder
+  optdepends=("$_dialogs")
+  _install_component finder
 }
 
 package_mayo-terminal-git() {
   pkgdesc='macOS Terminal-style terminal emulator (Mayonnaise)'
   depends=("${_appdeps[@]}")
-  optdepends=('xdg-utils: open links')
-  _app terminal mayo-terminal
+  optdepends=('xdg-utils: open links with Ctrl+click')
+  _install_component terminal
 }
 
 package_mayo-task-manager-git() {
-  pkgdesc='macOS Activity Monitor-style task manager (Mayonnaise)'
+  pkgdesc='Activity Monitor-style task manager (Mayonnaise)'
   depends=("${_appdeps[@]}")
-  _app task_manager mayo-task-manager
+  _install_component taskmanager
 }
 
 package_mayo-photos-git() {
-  pkgdesc='macOS Photos-style image viewer (Mayonnaise)'
+  pkgdesc='Photos-style image viewer (Mayonnaise)'
   depends=("${_appdeps[@]}")
-  optdepends=('zenity: file dialogs without an xdg-desktop-portal')
-  _app photos mayo-photos
+  optdepends=("$_dialogs")
+  _install_component photos
 }
 
 package_mayo-video-player-git() {
-  pkgdesc='macOS QuickTime-style video player (Mayonnaise)'
+  pkgdesc='Video player with a library gallery and .srt/.vtt subtitles (Mayonnaise)'
   depends=("${_appdeps[@]}" ffmpeg)
   optdepends=('libva: VAAPI hardware decoding'
-              'zenity: file dialogs without an xdg-desktop-portal')
-  _app video_player mayo-video-player
+              'xdg-utils: "Show in Files"'
+              "$_dialogs")
+  _install_component video_player
+}
+
+package_mayo-system-settings-git() {
+  pkgdesc='System Settings-style control centre for GNOME (Mayonnaise)'
+  depends=("${_appdeps[@]}" glib2 gsettings-desktop-schemas)
+  optdepends=('gnome-shell: Displays, Night Light and most desktop panels'
+              'gnome-settings-daemon: power, Night Light and media key settings'
+              'networkmanager: Wi-Fi and Network panels'
+              'bluez: Bluetooth panel'
+              'libpulse: Sound panel (pactl; works with PipeWire)'
+              'upower: battery information'
+              'power-profiles-daemon: power modes'
+              'accountsservice: Users and Region & Language panels'
+              'imagemagick: wallpaper thumbnails GNOME has not cached'
+              'iso-codes: language and country names'
+              'xkeyboard-config: keyboard layout names'
+              'fontconfig: font list in Appearance'
+              'tracker3-miners: search locations')
+  _install_component systemsettings
 }

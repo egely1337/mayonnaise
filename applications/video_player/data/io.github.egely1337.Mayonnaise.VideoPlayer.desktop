@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Video Player
+GenericName=Video Player
+Comment=Watch movies and play audio, with subtitles
+Exec=video_player %F
+Icon=io.github.egely1337.Mayonnaise.VideoPlayer
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Video;Player;
+Keywords=movie;film;video;subtitles;srt;player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;video/mp2t;video/x-m4v;audio/mpeg;audio/flac;audio/ogg;audio/x-wav;audio/mp4;audio/aac;application/x-subrip;

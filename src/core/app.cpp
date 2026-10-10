@@ -191,7 +191,7 @@ void App::Impl::reapClosedWindows() {
 
 App::App() : App(defaultAppName()) {}
 
-App::App(std::string name) : m_impl(std::make_unique<Impl>()) {
+App::App(std::string name, std::string desktopId) : m_impl(std::make_unique<Impl>()) {
     if (g_app) {
         std::fprintf(stderr, "mayonnaise: only one mayo::App may exist at a time\n");
         std::abort();
@@ -209,7 +209,7 @@ App::App(std::string name) : m_impl(std::make_unique<Impl>()) {
             impl->settings->save();
         });
     });
-    if (!platform::Platform::init()) std::abort();
+    if (!platform::Platform::init(desktopId)) std::abort();
     impl->refreshAppearance(true);
 }
 

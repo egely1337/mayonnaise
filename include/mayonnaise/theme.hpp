@@ -109,7 +109,7 @@ struct ThemeMetrics {
     float titlebarHeight = 52;     ///< unified title bar / toolbar height
     float trafficLightSize = 12;
     float trafficLightSpacing = 8;
-    float trafficLightInset = 18;  ///< from the left window edge
+    float trafficLightInset = 24;  ///< from the left window edge (clear of the sidebar panel's corner)
 
     float controlHeight = 24;
     float controlRadius = 7;

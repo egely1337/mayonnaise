@@ -470,6 +470,17 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.line(15, 2.5f, 15, 6.5f);
             pen.line(13, 4.5f, 17, 4.5f);
             break;
+        case Icon::Captions:
+            pen.rrect(2.5f, 4.5f, 15, 11, 2.5f);
+            pen.arc(7.6f, 10, 2.1f, 45, 270);
+            pen.arc(13.1f, 10, 2.1f, 45, 270);
+            break;
+        case Icon::Library:
+            pen.rrect(2.5f, 6.5f, 15, 10.5f, 2);
+            pen.line(4.5f, 4.2f, 15.5f, 4.2f);
+            pen.line(6.5f, 2.2f, 13.5f, 2.2f);
+            pen.p.fillTriangle(pen.at(8.5f, 9.3f), pen.at(12.6f, 11.75f), pen.at(8.5f, 14.2f), color, 0.6f * u);
+            break;
     }
 }
 

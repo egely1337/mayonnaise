@@ -16,7 +16,7 @@ enum class Icon : std::uint16_t {
     Cloud, Envelope, Calendar, Pencil, HeartFill, Import, ZoomIn, ZoomOut,
     Play, Pause, SkipBack, SkipForward, Backward, Forward, Expand, Contract, SpeakerSlash, Film, Repeat,
     ArrowDownCircle, MusicNote, HardDrive, Eject, Columns, Tag, DocOnDoc, FolderPlus, ArrowUpRight, Terminal,
-    Mouse, Accessibility, Network, Windows, Hourglass, Shield, Printer, Sparkles,
+    Mouse, Accessibility, Network, Windows, Hourglass, Shield, Printer, Sparkles, Captions, Library,
 };
 
 }  // namespace mayo

@@ -304,7 +304,8 @@ void PlatformWindow::setTextInputActive(bool active, Rect caretRect) {
 }
 
 // ---------------------------------------------------------------------------------------------
-bool Platform::init() {
+bool Platform::init(const std::string& appId) {
+    if (!appId.empty()) SDL_SetHint(SDL_HINT_APP_ID, appId.c_str());
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
     // EGL on X11 too (Wayland always uses it): zero-copy video needs EGL dma-buf import.
     if (!std::getenv("MAYO_GLX")) SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");

@@ -12,7 +12,7 @@ animations). The MVP targets Linux (X11 + Wayland via SDL3) with all platform co
 ## Build, run, test
 
 ```sh
-# configure + build (library, examples, tests)
+# configure + build (library, applications, tests)
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 
 # debug build (enables KHR_debug GL output)
@@ -20,31 +20,30 @@ cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug && cmake --build build-debug -j
 
 # ASan + UBSan build (the suppression file hides GL-driver leaks, see Gotchas)
 cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DMAYONNAISE_SANITIZE=ON && cmake --build build-asan -j
-LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./build-asan/examples/gallery/gallery
+LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./build-asan/applications/photos/photos
 
-# run examples
-./build/examples/hello/hello
-./build/examples/gallery/gallery
-./build/examples/settings_app/settings_app
-./build/examples/photos/photos <images or folders...>
-./build/examples/video_player/video_player <media files...>   # only built when FFmpeg dev libs exist
-./build/examples/task_manager/task_manager                    # Linux only
-./build/examples/finder/finder [folder]                         # Linux only
-./build/examples/terminal/terminal [directory]                  # Linux only
-./build/examples/system_settings/system_settings [panel]        # Linux + GIO; changes the real desktop!
+# run the applications (binaries are named as installed in /usr/bin)
+./build/applications/photos/photos <images or folders...>
+./build/applications/video_player/video_player [media files...]  # library gallery without files; needs FFmpeg dev libs
+./build/applications/task_manager/taskmanager                     # Linux only
+./build/applications/finder/finder [folder]                       # Linux only
+./build/applications/terminal/terminal [directory]                # Linux only
+./build/applications/system_settings/systemsettings [panel]       # Linux + GIO; changes the real desktop!
+
+# Arch packages (split: library + one package per app, plus mayo-apps-git)
+cd packaging/arch && makepkg -si   # builds whatever is committed
 
 # tests
 ctest --test-dir build --output-on-failure
 
 # headless-ish visual check: render N frames, save a PNG of the window, exit
-MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery/gallery
+MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/applications/photos/photos
 ```
 
 Useful environment variables:
 - `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window (`MAYO_SCREENSHOT_WINDOW=last`: the newest, e.g. a Settings window) after n frames (and at least s seconds, default 0.4) and quit. Screenshot runs never write settings.
-- `MAYO_DEMO=picker|menu|popover|<page>` (gallery) / `MAYO_DEMO=scroll` (settings_app) /
-  `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) / `MAYO_DEMO=seek:<s>` (video_player) — drive the
-  examples at startup for screenshots. The finder takes comma-separated steps, including file operations
+- `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) / `MAYO_DEMO=seek:<s>|captions|settings|home|all|recent`
+  (video_player) — drive the apps at startup for screenshots. The finder takes comma-separated steps, including file operations
   (`MAYO_DEMO="list,select:a.txt,duplicate:a.txt,wait:0.3,undo"`, full list in its main.cpp); point it at a
   scratch folder, and it never launches other programs in demo mode.
   System settings: `MAYO_DEMO=<panel>[:action]` (actions: `wifi:other`, `displays:keep`, `appearance:fonts`,
@@ -61,7 +60,7 @@ Useful environment variables:
 - `XDG_CONFIG_HOME=<dir>` — where settings live (`<dir>/mayonnaise/<app>/settings.conf`); point it at a scratch
   directory when testing so runs don't touch your real preferences.
 
-CMake options: `MAYONNAISE_BUILD_EXAMPLES` (ON), `MAYONNAISE_BUILD_TESTS` (ON),
+CMake options: `MAYONNAISE_BUILD_APPS` (ON; the old `MAYONNAISE_BUILD_EXAMPLES` still works), `MAYONNAISE_BUILD_TESTS` (ON),
 `MAYONNAISE_USE_SYSTEM_DEPS` (OFF), `MAYONNAISE_SANITIZE` (OFF).
 
 ## Architecture map
@@ -85,7 +84,9 @@ src/theme/            light/dark themes, type scale
 shaders/              GLSL, embedded at build time (cmake/Embed.cmake -> generated .cpp)
 assets/fonts/         InterVariable.ttf (OFL) + license, embedded at build time
 third_party/          vendored glad (generated GL 3.3 core + KHR_debug) and stb single headers
-examples/             photos, video_player, task_manager, finder, terminal, system_settings
+applications/         finder, terminal, task_manager, photos, video_player, system_settings; each has data/
+                      (.desktop + icon) and is its own CMake install component
+packaging/arch/       split PKGBUILD
 tests/                doctest unit tests (geometry, color, theme, layout, event dispatch)
 ```
 
@@ -149,6 +150,8 @@ Known issues / next steps:
 - Popups have a fade-in but no fade-out (they're removed immediately on dismiss).
 - Menus open below their button; macOS pop-up buttons overlay the selected row on the button.
 - Single-line TextField only; no multi-line text editor.
+- Video player: subtitles embedded in MKV/MP4 aren't read yet (external .srt/.vtt only); no ASS styling.
+- No project LICENSE file yet (the PKGBUILD says LicenseRef-custom).
 - System settings example: no Printers, Online Accounts, Sharing or Color panels; displays can't be dragged to
   rearrange (side-by-side packing only); the shortcut recorder can't capture keys the compositor grabs
   (Super+arrows) because SDL doesn't expose the keyboard-shortcuts-inhibit protocol; passwords are changed
@@ -183,11 +186,21 @@ Known issues / next steps:
   registered family has triggers a fontconfig `charset=` lookup once and the found font joins the fallbacks,
   so CJK, symbols and Nerd Font icons render anywhere (Finder file names too). Inter's tracking applies only
   to Inter glyphs.
-- **Terminal example**: `Screen` (examples/terminal/screen.cpp) is a UI-free xterm emulator tested by
+- **Terminal example**: `Screen` (applications/terminal/screen.cpp) is a UI-free xterm emulator tested by
   tests/test_terminal_screen.cpp; `Pty` reads on a worker thread with back-pressure (4 MB) and never blocks
   the UI on writes; `TerminalView` snaps cells to whole device pixels and draws box drawing, blocks, braille
   and powerline glyphs as geometry so they join between cells.
-- **System Settings example** (examples/system_settings) talks to GNOME through GIO (the only example with a
+- **Applications and packaging**: `applications/CMakeLists.txt` `mayonnaise_app(<binary> ID <desktop id> SOURCES ...)`
+  builds an app, passes the desktop id as `MAYO_DESKTOP_ID` to `mayo::App(name, desktopId)` (it becomes the
+  Wayland app_id / X11 class, so GNOME matches the window to the .desktop file and icon), and installs binary,
+  `data/<id>.desktop` and `data/<id>.svg` as install component `<binary>`. The PKGBUILD is one
+  `cmake --install --component` per package. App icons are generated by `tools/make_app_icons.py`
+  (superellipse squircles, original artwork); settings directories keep the old app names.
+- **Video player library**: `library.cpp` scans `$XDG_VIDEOS_DIR` + added folders on a thread, `Prober` workers
+  read duration and a thumbnail (freedesktop thumbnail cache first, else one decoded frame ~10% in, PNG-encoded
+  with FFmpeg into `~/.cache/mayonnaise/video_player/`). Subtitles (`subtitles.cpp`) are SRT/WebVTT files named
+  like the video; non-UTF-8 files are read in the Windows code page of the user's language (1254 for Turkish).
+- **System Settings example** (applications/system_settings) talks to GNOME through GIO (the only example with a
   GLib dependency, skipped without it). GLib's default main context runs on a background thread (`gx::start`);
   GSettings objects, D-Bus subscriptions and async calls are created on the UI thread, so their callbacks fire
   on that thread and hop over with `App::post` — panels never see GLib's thread. `gx::Key` wraps one key and
@@ -219,6 +232,8 @@ Known issues / next steps:
 
 ## Gotchas
 
+- **Traffic lights sit 24 pt in** (`trafficLightInset`): at 18 they overlapped the sidebar panel's rounded corner.
+- **Settings files keep tabs raw** (only `\n` and `\\` are escaped): hand-written test configs need real tabs.
 - **Hybrid GPUs load every EGL vendor.** glvnd's libEGL maps the NVIDIA stack (~90 MB RSS, can wake the dGPU)
   even when Mesa drives the display. `Platform::init` restricts EGL to Mesa on Wayland when all connected
   screens hang off non-NVIDIA GPUs, and unsets the variable once the context exists so launched programs
@@ -315,7 +330,7 @@ Known issues / next steps:
 - **Wheel vs touchpad**: SDL3 gives no device type; fractional deltas are treated as touchpad (1:1 + momentum),
   whole notches as a wheel (animated glide). Touchpad gesture end = no events for 70 ms.
 - **LeakSanitizer** reports ~311 bytes in `<unknown module>` frames: Mesa allocations in driver modules that
-  `SDL_Quit` unloads, reproducible with a bare SDL3 + GL program. Run examples with
+  `SDL_Quit` unloads, reproducible with a bare SDL3 + GL program. Run the apps with
   `LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp`.
 - **Canvas callbacks get local coordinates.** Capturing the canvas' own handle in its callback to read its frame
   creates a shared_ptr cycle (a real leak ASan caught in settings_app).

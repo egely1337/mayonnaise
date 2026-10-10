@@ -46,7 +46,10 @@ class App {
 public:
     /// Uses the executable's name as the app name.
     App();
-    explicit App(std::string name);
+    /// `desktopId` is the app's .desktop file name without the extension ("org.example.Notes"); it becomes the
+    /// Wayland app_id / X11 class, which is how docks and task switchers find the icon. Defaults to the
+    /// executable's name.
+    explicit App(std::string name, std::string desktopId = {});
     ~App();
     App(const App&) = delete;
     App& operator=(const App&) = delete;

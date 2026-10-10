@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Task Manager
+GenericName=System Monitor
+Comment=See processes and CPU, memory, disk and network activity
+Exec=taskmanager
+Icon=io.github.egely1337.Mayonnaise.TaskManager
+Terminal=false
+StartupNotify=true
+Categories=System;Monitor;
+Keywords=process;cpu;memory;network;activity;monitor;kill;

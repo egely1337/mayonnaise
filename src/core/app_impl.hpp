@@ -5,14 +5,11 @@
 #include <vector>
 
 #include "../platform/platform.hpp"
+#include "../render/renderer2d.hpp"
 #include "mayonnaise/app.hpp"
 #include "mayonnaise/window.hpp"
 
 namespace mayo {
-
-namespace render {
-class Renderer2D;
-}
 
 struct App::Impl {
     std::vector<std::unique_ptr<Window>> windows;
@@ -20,6 +17,7 @@ struct App::Impl {
     Appearance appearance = Appearance::Light;
     Color accent = Theme::defaultAccent();
     bool running = false;
+    std::unique_ptr<render::Renderer2D> renderer;  // shared by all windows (one GL context)
     bool quitRequested = false;
     int exitCode = 0;
 

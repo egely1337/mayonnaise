@@ -1,0 +1,104 @@
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include "gl.hpp"
+#include "mayonnaise/color.hpp"
+#include "mayonnaise/geometry.hpp"
+#include "mayonnaise/theme.hpp"
+
+namespace mayo::render {
+
+/// Batched immediate-mode 2D renderer. All public coordinates are logical points; they are scaled
+/// to device pixels on submission. Draws into an offscreen scene target so backdrop materials can
+/// sample (and blur) what has been drawn so far.
+class Renderer2D {
+public:
+    Renderer2D();
+    ~Renderer2D();
+    Renderer2D(const Renderer2D&) = delete;
+    Renderer2D& operator=(const Renderer2D&) = delete;
+
+    void beginFrame(int pixelWidth, int pixelHeight, float scale);
+    /// Flushes and copies the scene to the default framebuffer.
+    void endFrame();
+    /// Reads back the scene target as top-down RGBA8 (premultiplied).
+    std::vector<std::uint8_t> readPixels(int& width, int& height);
+
+    [[nodiscard]] float scale() const { return m_scale; }
+
+    // --- primitives (points) -------------------------------------------------------------
+    void fillRoundedRect(const Rect& r, const CornerRadii& radii, const Color& fill,
+                         const Color& border = Color::transparent(), float borderWidth = 0);
+    /// Stroke outside or inside the shape edge: `inset` < 0 draws the stroke outside (focus rings).
+    void strokeRoundedRect(const Rect& r, const CornerRadii& radii, const Color& color, float width);
+    void fillGradient(const Rect& r, const CornerRadii& radii, const Color& from, const Color& to, Point p0, Point p1);
+    void shadow(const Rect& r, float radius, const Color& color, float blur, Vec2 offset = {}, float spread = 0);
+    void line(Point a, Point b, const Color& color, float width);
+    /// Arc around `center`; angles in radians, 0 = +x, positive sweep is clockwise on screen.
+    void arc(Point center, float radius, float startAngle, float sweep, const Color& color, float width);
+    void image(const Rect& r, GLuint texture, const Rect& uv, const CornerRadii& radii, float opacity);
+    /// Glyph quad already in device pixels (text is laid out on the pixel grid).
+    void glyphPx(const Rect& px, GLuint atlas, const Rect& uv, const Color& color, float gamma);
+    /// Blurs everything drawn so far and draws it, tinted, inside the shape.
+    void backdrop(const Rect& r, const CornerRadii& radii, const MaterialStyle& style);
+
+    void pushClip(const Rect& r, float radius = 0);
+    void popClip();
+    [[nodiscard]] Rect currentClip() const;  // points
+    void pushOpacity(float opacity);
+    void popOpacity();
+
+    [[nodiscard]] int drawCallsLastFrame() const { return m_drawCallsLast; }
+
+private:
+    struct Instance {
+        float quad[4];
+        float shape[4];
+        float radii[4];
+        float color[4];
+        float color2[4];
+        float uv[4];
+        float params[4];
+        float clip[4];
+        float clip2[4];
+    };
+    struct Clip {
+        float l, t, r, b, radius;  // pixels
+    };
+    enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc };
+
+    Instance& push(Type type, float l, float t, float r, float b, GLuint texture);
+    bool culled(float l, float t, float r, float b) const;
+    void setColor(float* out, const Color& c) const;
+    void flush();
+    GLuint blurScene(float radiusPx, const Rect& regionPx);
+
+    gl::Program m_program;
+    gl::Program m_blurDown;
+    gl::Program m_blurUp;
+    gl::VertexArray m_vao;
+    gl::VertexArray m_emptyVao;
+    gl::Buffer m_instanceBuffer;
+    size_t m_instanceCapacity = 0;
+    gl::Texture m_whiteTexture;
+    GLint m_uViewport = -1;
+    GLint m_uTexture = -1;
+    GLint m_uViewportBlur[2] = {-1, -1};
+
+    gl::RenderTarget m_scene;
+    std::vector<gl::RenderTarget> m_blurChain;
+
+    std::vector<Instance> m_instances;
+    GLuint m_batchTexture = 0;
+    std::vector<Clip> m_clips;
+    std::vector<float> m_opacity;
+    int m_width = 0;
+    int m_height = 0;
+    float m_scale = 1;
+    int m_drawCalls = 0;
+    int m_drawCallsLast = 0;
+};
+
+}  // namespace mayo::render

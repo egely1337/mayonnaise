@@ -1,9 +1,15 @@
 #include "window_impl.hpp"
 
+#include <cstdlib>
+
 #include "../render/gl.hpp"
+#include "../render/renderer2d.hpp"
+#include "app_impl.hpp"
 #include "mayonnaise/app.hpp"
 
 namespace mayo {
+
+void drawRendererTestScene(render::Renderer2D& r, Size size, const Theme& theme);
 
 Window::Window(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) { m_impl->self = this; }
 Window::~Window() = default;
@@ -37,10 +43,29 @@ void Window::Impl::render() {
     int w = 0;
     int h = 0;
     platformWindow->pixelSize(w, h);
-    glViewport(0, 0, w, h);
-    Color bg = App::current().theme().colors.windowBackground;
-    glClearColor(bg.r, bg.g, bg.b, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    auto& app = App::current();
+    const Theme& theme = app.theme();
+    auto& r = *app.impl().renderer;
+    const float scale = static_cast<float>(w) / std::max(1.0f, platformWindow->sizeInPoints().width);
+    r.beginFrame(w, h, scale);
+
+    Size size = platformWindow->sizeInPoints();
+    const bool rounded = platformWindow->isTransparent() && !platformWindow->isMaximized() &&
+                         !platformWindow->isFullscreen();
+    const float radius = rounded ? theme.metrics.windowRadius : 0.0f;
+    Rect bounds{0, 0, size.width, size.height};
+    r.fillRoundedRect(bounds, radius, theme.colors.windowBackground);
+    r.pushClip(bounds, radius);
+    static const bool testScene = std::getenv("MAYO_TEST_SCENE") != nullptr;
+    if (testScene) drawRendererTestScene(r, size, theme);
+    r.popClip();
+    // Hairline border + inner highlight, like a macOS window edge.
+    if (rounded) {
+        r.strokeRoundedRect(bounds, radius, theme.colors.windowBorder, 1.0f / scale);
+        r.strokeRoundedRect(bounds.inset(1.0f / scale), radius - 1.0f / scale, theme.colors.windowHighlight,
+                            1.0f / scale);
+    }
+    r.endFrame();
     platformWindow->swapBuffers();
 }
 

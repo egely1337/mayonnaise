@@ -1,9 +1,12 @@
 add_library(mayonnaise
   core/app.cpp
   core/color.cpp
+  core/test_scene.cpp
   core/window.cpp
   platform/sdl_platform.cpp
   render/gl.cpp
+  render/image_io.cpp
+  render/renderer2d.cpp
   theme/theme.cpp
 )
 add_library(mayonnaise::mayonnaise ALIAS mayonnaise)
@@ -26,3 +29,12 @@ target_link_libraries(mayonnaise
     OpenGL::GL)
 mayonnaise_set_warnings(mayonnaise)
 mayonnaise_set_sanitizers(mayonnaise)
+
+mayonnaise_embed(mayonnaise
+  ${PROJECT_SOURCE_DIR}/shaders/ui.vert
+  ${PROJECT_SOURCE_DIR}/shaders/ui.frag
+  ${PROJECT_SOURCE_DIR}/shaders/fullscreen.vert
+  ${PROJECT_SOURCE_DIR}/shaders/blur_down.frag
+  ${PROJECT_SOURCE_DIR}/shaders/blur_up.frag
+  ${PROJECT_SOURCE_DIR}/assets/fonts/InterVariable.ttf
+)

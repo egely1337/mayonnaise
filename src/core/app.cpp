@@ -3,6 +3,7 @@
 #include <string>
 
 #include "../render/gl.hpp"
+#include "../render/image_io.hpp"
 #include "app_impl.hpp"
 #include "window_impl.hpp"
 
@@ -58,6 +59,19 @@ void App::Impl::renderDueWindows() {
         double d = w->impl().nextDeadline();
         if (d >= 0 && d <= now + 0.001) w->impl().render();
     }
+    if (!screenshotPath.empty() && !windows.empty()) {
+        if (++framesRendered >= screenshotFrames) {
+            int w = 0;
+            int h = 0;
+            auto pixels = renderer->readPixels(w, h);
+            if (!render::writePng(screenshotPath, w, h, std::move(pixels)))
+                std::fprintf(stderr, "mayonnaise: failed to write %s\n", screenshotPath.c_str());
+            screenshotPath.clear();
+            quitRequested = true;
+        } else {
+            windows.front()->impl().needsFrame = true;  // keep frames coming until the capture
+        }
+    }
 }
 
 void App::Impl::reapClosedWindows() {
@@ -75,6 +89,7 @@ App::App() : m_impl(std::make_unique<Impl>()) {
 
 App::~App() {
     m_impl->windows.clear();
+    m_impl->renderer.reset();
 
     platform::Platform::shutdown();
     g_app = nullptr;
@@ -96,6 +111,7 @@ Window& App::createWindow(const WindowOptions& options) {
         std::fprintf(stderr, "mayonnaise: failed to load OpenGL 3.3 functions\n");
         std::abort();
     }
+    if (!m_impl->renderer) m_impl->renderer = std::make_unique<render::Renderer2D>();
     auto window = std::unique_ptr<Window>(new Window(std::move(impl)));
     Window& ref = *window;
     m_impl->windows.push_back(std::move(window));

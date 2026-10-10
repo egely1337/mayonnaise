@@ -1,0 +1,5 @@
+/src/
+/pkg/
+/mayonnaise/
+*.pkg.tar.*
+*.log

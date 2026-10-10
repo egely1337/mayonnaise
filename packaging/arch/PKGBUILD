@@ -1,0 +1,99 @@
+# Maintainer: egely <egely1337@icloud.com>
+#
+# Builds from the git repository two directories up (whatever is committed on
+# its checked-out branch). Run `makepkg -s` here; install with `sudo pacman -U`.
+
+pkgbase=mayonnaise-git
+pkgname=(mayonnaise-git
+         mayo-finder-git
+         mayo-terminal-git
+         mayo-task-manager-git
+         mayo-photos-git
+         mayo-video-player-git)
+pkgver=0.1.0.r20.1b26a70
+pkgrel=1
+pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3'
+arch=(x86_64)
+url='https://github.com/egely1337/mayonnaise'
+license=(custom)
+makedepends=(git cmake sdl3 freetype2 ffmpeg)
+source=("mayonnaise::git+file://${startdir}/../.."
+        mayo-finder.desktop
+        mayo-terminal.desktop
+        mayo-task-manager.desktop
+        mayo-photos.desktop
+        mayo-video-player.desktop)
+sha256sums=(SKIP SKIP SKIP SKIP SKIP SKIP)
+
+pkgver() {
+  cd mayonnaise
+  printf '0.1.0.r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+build() {
+  # stb's asserts embed __FILE__; keep the build directory out of the binaries
+  CFLAGS+=" -ffile-prefix-map=$srcdir=."
+  CXXFLAGS+=" -ffile-prefix-map=$srcdir=."
+  cmake -B build -S mayonnaise \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DMAYONNAISE_USE_SYSTEM_DEPS=ON \
+    -DMAYONNAISE_BUILD_EXAMPLES=ON \
+    -DMAYONNAISE_BUILD_TESTS=OFF \
+    -Wno-dev
+  cmake --build build -j"$(nproc)"
+}
+
+package_mayonnaise-git() {
+  pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3 (static library + headers)'
+  depends=(sdl3 freetype2)
+  provides=(mayonnaise)
+  conflicts=(mayonnaise)
+  options=(staticlibs)
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 mayonnaise/assets/fonts/Inter-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Inter-LICENSE.txt"
+}
+
+# The apps link the library statically, so they don't depend on mayonnaise-git.
+# fontconfig and dbus are dlopen()ed at run time (font fallbacks, desktop accent colour).
+_app() { # <binary in build/examples> <installed name>
+  install -Dm755 "build/examples/$1/$1" "$pkgdir/usr/bin/$2"
+  install -Dm644 "$2.desktop" "$pkgdir/usr/share/applications/$2.desktop"
+  install -Dm644 mayonnaise/assets/fonts/Inter-LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/Inter-LICENSE.txt"
+}
+_appdeps=(sdl3 freetype2 fontconfig dbus)
+
+package_mayo-finder-git() {
+  pkgdesc='macOS Finder-style file manager (Mayonnaise)'
+  depends=("${_appdeps[@]}" xdg-utils)
+  optdepends=('zenity: file dialogs without an xdg-desktop-portal')
+  _app finder mayo-finder
+}
+
+package_mayo-terminal-git() {
+  pkgdesc='macOS Terminal-style terminal emulator (Mayonnaise)'
+  depends=("${_appdeps[@]}")
+  optdepends=('xdg-utils: open links')
+  _app terminal mayo-terminal
+}
+
+package_mayo-task-manager-git() {
+  pkgdesc='macOS Activity Monitor-style task manager (Mayonnaise)'
+  depends=("${_appdeps[@]}")
+  _app task_manager mayo-task-manager
+}
+
+package_mayo-photos-git() {
+  pkgdesc='macOS Photos-style image viewer (Mayonnaise)'
+  depends=("${_appdeps[@]}")
+  optdepends=('zenity: file dialogs without an xdg-desktop-portal')
+  _app photos mayo-photos
+}
+
+package_mayo-video-player-git() {
+  pkgdesc='macOS QuickTime-style video player (Mayonnaise)'
+  depends=("${_appdeps[@]}" ffmpeg)
+  optdepends=('libva: VAAPI hardware decoding'
+              'zenity: file dialogs without an xdg-desktop-portal')
+  _app video_player mayo-video-player
+}

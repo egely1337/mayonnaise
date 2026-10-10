@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Finder
+GenericName=File Manager
+Comment=Browse and manage files
+Exec=mayo-finder %F
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+StartupWMClass=mayo-finder

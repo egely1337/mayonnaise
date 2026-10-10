@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Video Player
+GenericName=Video Player
+Comment=Play video and audio files
+Exec=mayo-video-player %F
+Icon=multimedia-video-player
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=mayo-video-player
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;audio/mpeg;audio/flac;audio/ogg;

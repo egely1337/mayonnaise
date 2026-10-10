@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Task Manager
+GenericName=System Monitor
+Comment=Monitor processes and system resources
+Exec=mayo-task-manager
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+StartupWMClass=mayo-task-manager

@@ -215,9 +215,11 @@ App::App(std::string name) : m_impl(std::make_unique<Impl>()) {
 
 App::~App() {
     m_impl->settings->save();
-    m_impl->windows.clear();
+    // Shared GL objects go while a window still has the context current: once the last window is
+    // destroyed, glDelete* can jump into an unloaded driver (crashed with Arch's -O3 package flags).
     m_impl->text.reset();
     m_impl->renderer.reset();
+    m_impl->windows.clear();
 
     platform::Platform::shutdown();
     g_app = nullptr;

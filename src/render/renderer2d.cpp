@@ -19,6 +19,8 @@ Renderer2D::Renderer2D() {
     m_blurUp = gl::makeProgram(text(embedded::fullscreen_vert), text(embedded::blur_up_frag), "blur_up");
     m_uViewport = glGetUniformLocation(m_program.id(), "u_viewport");
     m_uTexture = glGetUniformLocation(m_program.id(), "u_texture");
+    m_uTexture1 = glGetUniformLocation(m_program.id(), "u_texture1");
+    m_uTexture2 = glGetUniformLocation(m_program.id(), "u_texture2");
 
     m_vao = gl::makeVertexArray();
     m_emptyVao = gl::makeVertexArray();
@@ -298,6 +300,40 @@ void Renderer2D::image(const Rect& rect, GLuint texture, const Rect& uv, const C
     in.color[3] = opacity * m_opacity.back();
 }
 
+void Renderer2D::video(const Rect& rect, const GLuint (&tex)[3], bool planar, int matrix, bool fullRange,
+                       const CornerRadii& radii, float opacity) {
+    const float s = m_scale;
+    float l = std::round(rect.left() * s);
+    float t = std::round(rect.top() * s);
+    float r = std::round(rect.right() * s);
+    float b = std::round(rect.bottom() * s);
+    if (!tex[0] || !tex[1] || culled(l, t, r, b)) return;
+    // Video needs extra texture units; give it a batch of its own.
+    flush();
+    m_extraTextures[0] = tex[1];
+    m_extraTextures[1] = tex[2];
+    Instance& in = push(Type::Video, l, t, r, b, tex[0]);
+    in.shape[0] = (l + r) * 0.5f;
+    in.shape[1] = (t + b) * 0.5f;
+    in.shape[2] = (r - l) * 0.5f;
+    in.shape[3] = (b - t) * 0.5f;
+    const float maxR = std::min(in.shape[2], in.shape[3]);
+    in.radii[0] = std::min(radii.topLeft * s, maxR);
+    in.radii[1] = std::min(radii.topRight * s, maxR);
+    in.radii[2] = std::min(radii.bottomRight * s, maxR);
+    in.radii[3] = std::min(radii.bottomLeft * s, maxR);
+    in.uv[0] = 0;
+    in.uv[1] = 0;
+    in.uv[2] = 1;
+    in.uv[3] = 1;
+    in.color[3] = opacity * m_opacity.back();
+    in.params[1] = planar ? 1.0f : 0.0f;
+    in.params[2] = static_cast<float>(matrix);
+    in.params[3] = fullRange ? 1.0f : 0.0f;
+    flush();
+    m_extraTextures[0] = m_extraTextures[1] = 0;
+}
+
 void Renderer2D::glyphPx(const Rect& px, GLuint atlas, const Rect& uv, const Color& color, float gamma) {
     if (culled(px.left(), px.top(), px.right(), px.bottom())) return;
     Instance& in = push(Type::Glyph, px.left(), px.top(), px.right(), px.bottom(), atlas);
@@ -390,6 +426,12 @@ void Renderer2D::flush() {
     glUseProgram(m_program.id());
     glUniform2f(m_uViewport, static_cast<float>(m_width), static_cast<float>(m_height));
     glUniform1i(m_uTexture, 0);
+    glUniform1i(m_uTexture1, 1);
+    glUniform1i(m_uTexture2, 2);
+    for (int i = 0; i < 2; ++i) {
+        glActiveTexture(static_cast<GLenum>(GL_TEXTURE1 + i));
+        glBindTexture(GL_TEXTURE_2D, m_extraTextures[i] ? m_extraTextures[i] : m_whiteTexture.id());
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_batchTexture ? m_batchTexture : m_whiteTexture.id());
 

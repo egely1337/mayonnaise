@@ -2,6 +2,9 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_drm.h>
+#include <libavutil/pixdesc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libswresample/swresample.h>
@@ -12,7 +15,9 @@ extern "C" {
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
+#include <thread>
 
 namespace {
 
@@ -21,7 +26,34 @@ constexpr std::size_t kMaxPacketBytes = 32u << 20;
 constexpr std::size_t kMaxPackets = 240;
 constexpr double kAudioAhead = 0.35;           // seconds of audio queued at the device
 constexpr int kOutRate = 48000;
-constexpr int kMaxWidth = 2560;                // 4K is downscaled: it's uploaded as RGBA every frame
+constexpr std::uint32_t fourcc(char a, char b, char c, char d) {
+    return static_cast<std::uint32_t>(a) | (static_cast<std::uint32_t>(b) << 8) | (static_cast<std::uint32_t>(c) << 16) |
+           (static_cast<std::uint32_t>(d) << 24);
+}
+constexpr std::uint32_t kDrmR8 = fourcc('R', '8', ' ', ' ');
+constexpr std::uint32_t kDrmGR88 = fourcc('G', 'R', '8', '8');
+constexpr std::uint32_t kDrmR16 = fourcc('R', '1', '6', ' ');
+constexpr std::uint32_t kDrmGR1616 = fourcc('G', 'R', '3', '2');
+constexpr std::uint32_t kDrmNV12 = fourcc('N', 'V', '1', '2');
+constexpr std::uint32_t kDrmP010 = fourcc('P', '0', '1', '0');
+
+std::shared_ptr<AVFrame> share(AVFrame* f) {
+    return std::shared_ptr<AVFrame>(f, [](AVFrame* p) { av_frame_free(&p); });
+}
+
+mayo::VideoColor colorOf(const AVFrame* f) {
+    mayo::VideoColor c;
+    switch (f->colorspace) {
+        case AVCOL_SPC_BT470BG:
+        case AVCOL_SPC_SMPTE170M: c.matrix = mayo::YuvMatrix::BT601; break;
+        case AVCOL_SPC_BT2020_NCL:
+        case AVCOL_SPC_BT2020_CL: c.matrix = mayo::YuvMatrix::BT2020; break;
+        case AVCOL_SPC_BT709: c.matrix = mayo::YuvMatrix::BT709; break;
+        default: c.matrix = f->height >= 720 ? mayo::YuvMatrix::BT709 : mayo::YuvMatrix::BT601; break;
+    }
+    c.fullRange = f->color_range == AVCOL_RANGE_JPEG || f->format == AV_PIX_FMT_YUVJ420P;
+    return c;
+}
 
 double wallClock() {
     using namespace std::chrono;
@@ -33,7 +65,8 @@ std::string upper(std::string s) {
     return s;
 }
 
-AVCodecContext* openDecoder(AVStream* stream, const AVCodec* codec) {
+AVCodecContext* openDecoder(AVStream* stream, const AVCodec* codec, void (*configure)(AVCodecContext*, void*) = nullptr,
+                            void* user = nullptr) {
     AVCodecContext* ctx = avcodec_alloc_context3(codec);
     if (!ctx) return nullptr;
     if (avcodec_parameters_to_context(ctx, stream->codecpar) < 0) {
@@ -42,8 +75,45 @@ AVCodecContext* openDecoder(AVStream* stream, const AVCodec* codec) {
     }
     ctx->thread_count = 0;  // let FFmpeg pick (frame + slice threads)
     ctx->pkt_timebase = stream->time_base;
+    if (configure) configure(ctx, user);
     if (avcodec_open2(ctx, codec, nullptr) < 0) avcodec_free_context(&ctx);
     return ctx;
+}
+
+/// Preferred hardware device types, from MAYO_HWDEC (auto | none | vaapi | cuda | vulkan | vdpau).
+std::vector<AVHWDeviceType> wantedDevices() {
+    const char* env = std::getenv("MAYO_HWDEC");
+    std::string mode = env ? env : "auto";
+    if (mode == "none" || mode == "no" || mode == "software") return {};
+    if (mode != "auto") {
+        AVHWDeviceType t = av_hwdevice_find_type_by_name(mode.c_str());
+        if (t != AV_HWDEVICE_TYPE_NONE) return {t};
+    }
+    return {AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_CUDA, AV_HWDEVICE_TYPE_VULKAN, AV_HWDEVICE_TYPE_VDPAU};
+}
+
+/// get_format callback: take the hardware surface format if offered, otherwise the first software one.
+AVPixelFormat chooseFormat(AVCodecContext* ctx, const AVPixelFormat* formats) {
+    auto* player = static_cast<MediaPlayer*>(ctx->opaque);
+    for (const AVPixelFormat* f = formats; *f != AV_PIX_FMT_NONE; ++f) {
+        if (*f == player->hwPixelFormat()) return *f;
+    }
+    // The GPU can't decode this stream (profile, bit depth, size): FFmpeg continues in software.
+    player->noteHardwareFallback();
+    for (const AVPixelFormat* f = formats; *f != AV_PIX_FMT_NONE; ++f) {
+        const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(*f);
+        if (d && !(d->flags & AV_PIX_FMT_FLAG_HWACCEL)) return *f;
+    }
+    return formats[0];
+}
+
+/// Pixel format of `codec`'s hardware surfaces for device `type`, or -1.
+int hwFormatFor(const AVCodec* codec, AVHWDeviceType type) {
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i);
+        if (!cfg) return -1;
+        if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && cfg->device_type == type) return cfg->pix_fmt;
+    }
 }
 
 }  // namespace
@@ -101,18 +171,30 @@ bool MediaPlayer::open(const std::string& path, std::string& error) {
     }
     if (m_videoStream >= 0) {
         AVStream* st = m_format->streams[m_videoStream];
-        m_video = openDecoder(st, vcodec);
+        const bool hw = setupHardware(vcodec, st->codecpar->codec_id);
+        m_video = openDecoder(st, vcodec, [](AVCodecContext* ctx, void* user) {
+            auto* self = static_cast<MediaPlayer*>(user);
+            if (!self->m_hwDevice) return;
+            ctx->hw_device_ctx = av_buffer_ref(self->m_hwDevice);
+            ctx->opaque = self;
+            ctx->get_format = &chooseFormat;
+            // Frames queued for display (and the one on screen) pin decoder surfaces.
+            ctx->extra_hw_frames = static_cast<int>(kMaxFrames) + 4;
+        }, this);
+        if (!m_video && hw) {
+            // The hardware path refused to open: try plain software decoding.
+            av_buffer_unref(&m_hwDevice);
+            m_hwFormat = -1;
+            vcodec = avcodec_find_decoder(st->codecpar->codec_id);
+            m_video = vcodec ? openDecoder(st, vcodec) : nullptr;
+        }
         if (!m_video) {
             m_videoStream = -1;
         } else {
             m_outW = m_video->width;
             m_outH = m_video->height;
-            if (m_outW > kMaxWidth) {
-                m_outH = static_cast<int>(std::lround(static_cast<double>(m_outH) * kMaxWidth / m_outW));
-                m_outW = kMaxWidth;
-            }
-            m_outW &= ~1;
-            m_outH &= ~1;
+            AVRational fr = av_guess_frame_rate(m_format, st, nullptr);
+            m_frameRate = fr.num > 0 && fr.den > 0 ? av_q2d(fr) : 0;
             AVRational sar = av_guess_sample_aspect_ratio(m_format, st, nullptr);
             double pixel = sar.num > 0 && sar.den > 0 ? av_q2d(sar) : 1.0;
             m_aspect = m_video->height > 0 ? m_video->width * pixel / m_video->height : 16.0 / 9.0;
@@ -192,12 +274,49 @@ void MediaPlayer::stopThreads() {
     m_frames.clear();
 }
 
+bool MediaPlayer::setupHardware(const AVCodec*& codec, int codecId) {
+    for (AVHWDeviceType type : wantedDevices()) {
+        // The default decoder may be software-only (libdav1d for AV1); find one that supports `type`.
+        const AVCodec* candidate = hwFormatFor(codec, type) >= 0 ? codec : nullptr;
+        void* it = nullptr;
+        for (const AVCodec* c = nullptr; !candidate && (c = av_codec_iterate(&it));) {
+            if (av_codec_is_decoder(c) && c->id == codecId && hwFormatFor(c, type) >= 0) candidate = c;
+        }
+        if (!candidate) continue;
+        if (av_hwdevice_ctx_create(&m_hwDevice, type, nullptr, nullptr, 0) < 0) continue;
+        codec = candidate;
+        m_hwFormat = hwFormatFor(candidate, type);
+        m_hwName = av_hwdevice_get_type_name(type);
+        // Zero-copy display needs VAAPI surfaces exported as dma-bufs and EGL to import them.
+        m_zeroCopy = type == AV_HWDEVICE_TYPE_VAAPI && mayo::VideoTexture::dmaBufSupported() &&
+                     !std::getenv("MAYO_NO_ZEROCOPY");
+        return true;
+    }
+    return false;
+}
+
+std::string MediaPlayer::decoderDescription() const {
+    if (!m_video) return "No video";
+    if (m_hwDevice && !m_hwFellBack) {
+        std::string name = m_hwName;
+        for (auto& ch : name) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        return "Hardware · " + name + (m_zeroCopy ? " · zero-copy" : " · copy-back");
+    }
+    std::string why = m_hwFellBack ? " (GPU can't decode this stream)" : "";
+    return "Software · " + std::to_string(std::max(1, m_video->thread_count)) + " threads" + why;
+}
+
 void MediaPlayer::close() {
     stopThreads();
     avcodec_free_context(&m_video);
     avcodec_free_context(&m_audio);
     if (m_format) avformat_close_input(&m_format);
     m_output.reset();
+    av_buffer_unref(&m_hwDevice);
+    m_hwFormat = -1;
+    m_hwFellBack = false;
+    m_zeroCopy = false;
+    m_dropped = 0;
     m_videoStream = m_audioStream = -1;
     m_outW = m_outH = 0;
     m_duration = 0;
@@ -280,6 +399,7 @@ bool MediaPlayer::takeFrame(Frame& out) {
         const double clock = position();
         // Skip frames that are already late; keep the newest one that is due.
         while (!m_frames.empty() && m_frames.front().pts <= clock + 0.004) {
+            if (got) ++m_dropped;  // a newer frame was already due: this one never reached the screen
             out = std::move(m_frames.front());
             m_frames.pop_front();
             got = true;
@@ -350,6 +470,59 @@ void MediaPlayer::videoLoop() {
     SwsContext* sws = nullptr;
     const double tb = av_q2d(m_format->streams[m_videoStream]->time_base);
     int current = -1;
+    // Turns whatever the decoder produced into something VideoTexture can display.
+    auto present = [&](AVFrame* src) -> std::shared_ptr<AVFrame> {
+        if (src->format == m_hwFormat) {
+            if (m_zeroCopy) {
+                AVFrame* mapped = av_frame_alloc();
+                mapped->format = AV_PIX_FMT_DRM_PRIME;
+                if (av_hwframe_map(mapped, src, AV_HWFRAME_MAP_READ) == 0) {
+                    av_frame_copy_props(mapped, src);
+                    return share(mapped);  // keeps the surface referenced
+                }
+                av_frame_free(&mapped);
+                m_zeroCopy = false;  // export not possible on this driver: copy back from now on
+            }
+            AVFrame* sw = av_frame_alloc();
+            if (av_hwframe_transfer_data(sw, src, 0) < 0) {
+                av_frame_free(&sw);
+                return nullptr;
+            }
+            av_frame_copy_props(sw, src);
+            auto owned = share(sw);
+            if (sw->format == AV_PIX_FMT_NV12 || sw->format == AV_PIX_FMT_P010 || sw->format == AV_PIX_FMT_P016) return owned;
+            // Unusual transfer formats are normalised below.
+            AVFrame* conv = av_frame_alloc();
+            conv->format = AV_PIX_FMT_YUV420P;
+            conv->width = sw->width;
+            conv->height = sw->height;
+            av_frame_get_buffer(conv, 0);
+            sws = sws_getCachedContext(sws, sw->width, sw->height, static_cast<AVPixelFormat>(sw->format), sw->width,
+                                       sw->height, AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr, nullptr, nullptr);
+            sws_scale(sws, sw->data, sw->linesize, 0, sw->height, conv->data, conv->linesize);
+            av_frame_copy_props(conv, sw);
+            return share(conv);
+        }
+        const auto fmt = static_cast<AVPixelFormat>(src->format);
+        if (fmt == AV_PIX_FMT_YUV420P || fmt == AV_PIX_FMT_YUVJ420P || fmt == AV_PIX_FMT_NV12 || fmt == AV_PIX_FMT_P010) {
+            AVFrame* ref = av_frame_alloc();
+            av_frame_ref(ref, src);  // no copy: the decoder's buffer is shared
+            return share(ref);
+        }
+        // Other software formats (4:2:2, 4:4:4, 10-bit planar, RGB...): convert on the CPU.
+        const bool deep = av_pix_fmt_desc_get(fmt) && av_pix_fmt_desc_get(fmt)->comp[0].depth > 8;
+        AVFrame* conv = av_frame_alloc();
+        conv->format = deep ? AV_PIX_FMT_P010 : AV_PIX_FMT_YUV420P;
+        conv->width = src->width;
+        conv->height = src->height;
+        av_frame_get_buffer(conv, 0);
+        sws = sws_getCachedContext(sws, src->width, src->height, fmt, src->width, src->height,
+                                   static_cast<AVPixelFormat>(conv->format), SWS_BILINEAR, nullptr, nullptr, nullptr);
+        sws_scale(sws, src->data, src->linesize, 0, src->height, conv->data, conv->linesize);
+        av_frame_copy_props(conv, src);
+        return share(conv);
+    };
+
     while (!m_stop) {
         PacketQueue::Entry e{};
         if (!m_videoPackets.pop(e, m_stop)) break;
@@ -370,18 +543,12 @@ void MediaPlayer::videoLoop() {
                 av_frame_unref(frame);
                 continue;
             }
-            sws = sws_getCachedContext(sws, frame->width, frame->height, static_cast<AVPixelFormat>(frame->format),
-                                       m_outW, m_outH, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
             Frame out;
-            out.width = m_outW;
-            out.height = m_outH;
+            out.frame = present(frame);
             out.pts = pts;
             out.serial = current;
-            out.rgba.resize(static_cast<std::size_t>(m_outW) * m_outH * 4);
-            uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
-            int stride[4] = {m_outW * 4, 0, 0, 0};
-            if (sws) sws_scale(sws, frame->data, frame->linesize, 0, frame->height, dst, stride);
             av_frame_unref(frame);
+            if (!out.frame) continue;
 
             std::unique_lock lock(m_frameMutex);
             m_frameCv.wait(lock, [&] { return m_stop || m_frames.size() < kMaxFrames || current != m_serial; });
@@ -392,6 +559,58 @@ void MediaPlayer::videoLoop() {
     }
     sws_freeContext(sws);
     av_frame_free(&frame);
+}
+
+bool MediaPlayer::Frame::uploadTo(mayo::VideoTexture& texture) const {
+    const AVFrame* f = frame.get();
+    if (!f) return false;
+    const mayo::VideoColor color = colorOf(f);
+    switch (f->format) {
+        case AV_PIX_FMT_DRM_PRIME: {
+            const auto* desc = reinterpret_cast<const AVDRMFrameDescriptor*>(f->data[0]);
+            std::vector<mayo::DmaBufLayer> layers;
+            auto plane = [&](const AVDRMPlaneDescriptor& p, std::uint32_t format, int w, int h) {
+                const AVDRMObjectDescriptor& obj = desc->objects[p.object_index];
+                mayo::DmaBufLayer l;
+                l.drmFormat = format;
+                l.width = w;
+                l.height = h;
+                l.fd = obj.fd;
+                l.offset = static_cast<std::uint32_t>(p.offset);
+                l.pitch = static_cast<std::uint32_t>(p.pitch);
+                l.modifier = obj.format_modifier;
+                layers.push_back(l);
+            };
+            const int cw = (f->width + 1) / 2;
+            const int ch = (f->height + 1) / 2;
+            if (desc->nb_layers == 2) {
+                // Separate layers (VAAPI's default export): R8 + GR88, or R16 + GR1616 for 10-bit.
+                plane(desc->layers[0].planes[0], desc->layers[0].format, f->width, f->height);
+                plane(desc->layers[1].planes[0], desc->layers[1].format, cw, ch);
+            } else if (desc->nb_layers == 1 && desc->layers[0].nb_planes == 2) {
+                // One NV12/P010 layer: import each plane as its own single-channel image.
+                const bool deep = desc->layers[0].format == kDrmP010;
+                if (!deep && desc->layers[0].format != kDrmNV12) return false;
+                plane(desc->layers[0].planes[0], deep ? kDrmR16 : kDrmR8, f->width, f->height);
+                plane(desc->layers[0].planes[1], deep ? kDrmGR1616 : kDrmGR88, cw, ch);
+            } else {
+                return false;
+            }
+            return texture.importDmaBuf(f->width, f->height, layers, color);
+        }
+        case AV_PIX_FMT_NV12:
+        case AV_PIX_FMT_P010:
+        case AV_PIX_FMT_P016:
+            texture.uploadNV12(f->width, f->height, {f->data[0], f->linesize[0]}, {f->data[1], f->linesize[1]}, color,
+                               f->format != AV_PIX_FMT_NV12);
+            return true;
+        case AV_PIX_FMT_YUV420P:
+        case AV_PIX_FMT_YUVJ420P:
+            texture.uploadI420(f->width, f->height, {f->data[0], f->linesize[0]}, {f->data[1], f->linesize[1]},
+                               {f->data[2], f->linesize[2]}, color);
+            return true;
+        default: return false;
+    }
 }
 
 void MediaPlayer::audioLoop() {

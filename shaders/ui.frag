@@ -15,6 +15,8 @@ flat in vec4 v_rclip;
 flat in vec4 v_clip2;
 
 uniform sampler2D u_texture;
+uniform sampler2D u_texture1;  // video chroma (UV, or U)
+uniform sampler2D u_texture2;  // video V (planar formats)
 uniform vec2 u_viewport;
 
 out vec4 o_color;
@@ -28,6 +30,25 @@ const int kGradient = 5;
 const int kBackdrop = 6;
 const int kArc = 7;
 const int kTriangle = 8;
+const int kVideo = 9;
+
+// Limited/full-range YUV to sRGB for the common matrices.
+vec3 yuvToRgb(float y, vec2 uv, int matrix, bool fullRange) {
+    if (fullRange) {
+        uv -= 0.5;
+    } else {
+        y = (y - 16.0 / 255.0) * (255.0 / 219.0);
+        uv = (uv - 128.0 / 255.0) * (255.0 / 224.0);
+    }
+    vec3 rgb;
+    if (matrix == 0)
+        rgb = vec3(y + 1.402 * uv.y, y - 0.344136 * uv.x - 0.714136 * uv.y, y + 1.772 * uv.x);
+    else if (matrix == 2)
+        rgb = vec3(y + 1.4746 * uv.y, y - 0.164553 * uv.x - 0.571353 * uv.y, y + 1.8814 * uv.x);
+    else
+        rgb = vec3(y + 1.5748 * uv.y, y - 0.187324 * uv.x - 0.468124 * uv.y, y + 1.8556 * uv.x);
+    return clamp(rgb, 0.0, 1.0);
+}
 
 // Signed distance to a triangle (Inigo Quilez).
 float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
@@ -154,6 +175,12 @@ void main() {
             float fy = (p.y + v_shape.w) / (2.0 * v_shape.w);
             alpha *= 1.0 - smoothstep(1.0 - v_params.y, 1.0, fy);
         }
+    } else if (type == kVideo) {
+        alpha = coverage(sdRoundBox(p, v_shape.zw, v_radii));
+        float y = texture(u_texture, v_uv).r;
+        vec2 uv = v_params.y > 0.5 ? vec2(texture(u_texture1, v_uv).r, texture(u_texture2, v_uv).r)
+                                   : texture(u_texture1, v_uv).rg;
+        color = vec4(yuvToRgb(y, uv, int(v_params.z + 0.5), v_params.w > 0.5), 1.0) * v_color.a;
     } else if (type == kTriangle) {
         alpha = coverage(sdTriangle(v_pixel, v_shape.xy, v_shape.zw, v_gradient.xy) - v_gradient.z);
     } else if (type == kArc) {

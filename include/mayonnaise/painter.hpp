@@ -9,6 +9,7 @@
 namespace mayo {
 
 class ImageData;
+class VideoTexture;
 enum class Icon : std::uint16_t;
 
 namespace render {
@@ -54,6 +55,8 @@ public:
     /// Draws `image` stretched into `r` (sample `source`, in normalised 0..1 texture coordinates).
     void drawImage(const Rect& r, const ImageData& image, const CornerRadii& radii = {}, float opacity = 1,
                    const Rect& source = {0, 0, 1, 1});
+    /// Draws a YUV video frame (converted to RGB on the GPU) stretched into `r`.
+    void drawVideo(const Rect& r, const VideoTexture& video, const CornerRadii& radii = {}, float opacity = 1);
     void drawIcon(Icon icon, const Rect& r, const Color& color, float weight = 1);
 
     // Text ------------------------------------------------------------------------------

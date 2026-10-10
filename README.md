@@ -40,6 +40,13 @@ threads with audio as the master clock and frame-accurate seeking. Drop several 
 ```
 
 Keys: Space/K play-pause · ←/→ 5 s · J/L 10 s · ↑/↓ volume · M mute · F full screen · Ctrl+O open.
+
+**Hardware decoding**: H.264, HEVC (incl. 10-bit), VP9 and AV1 decode on the GPU through VAAPI (AMD/Intel;
+CUDA, Vulkan and VDPAU are tried next). On VAAPI the decoded surface is shared with OpenGL as a dma-buf
+(zero-copy: the picture never visits system memory); YUV→RGB (BT.601/709/2020, limited/full range, 10-bit)
+happens in the shader for every path, software decoding included. If the GPU can't handle a stream FFmpeg
+falls back to software automatically; the ⓘ button in the HUD shows which path is in use.
+`MAYO_HWDEC=auto|none|vaapi|cuda|vulkan|vdpau` and `MAYO_NO_ZEROCOPY=1` override the choice.
 It needs FFmpeg's development packages (`libavformat-dev libavcodec-dev libswscale-dev libswresample-dev`
 on Ubuntu, `ffmpeg-free-devel` on Fedora); without them CMake simply skips this example.
 
@@ -176,7 +183,8 @@ mayo::HStack({ name, save }).spacing(8).padding(12)
 - Images: `mayo::ImageData::load(path, maxDimension)` decodes off the UI thread (PNG, JPEG with EXIF
   orientation, GIF, BMP, TGA); `mayo::Image(data).contentMode(ContentMode::Fill)` displays it.
 - Touchpad pinch arrives as `Widget::onMagnify(const MagnifyEvent&)`.
-- Media: `mayo::AudioOutput` streams float PCM to the default device (thread-safe writes);
+- Media: `mayo::VideoTexture` holds YUV frames (I420, NV12, P010 uploads or zero-copy dma-buf imports) and
+  `Painter::drawVideo()` converts them on the GPU; `mayo::AudioOutput` streams float PCM to the default device (thread-safe writes);
   `ImageData::create(w, h)` + `update(pixels)` for frames that change every vsync;
   `window.setFullscreen()`, `window.setChromeHidden()` (fades the title bar); `Painter::fillTriangle()`.
 - Custom drawing: `mayo::Canvas([](mayo::Painter& p, mayo::Rect r) { p.fillCircle(r.center(), 8, c); })`.

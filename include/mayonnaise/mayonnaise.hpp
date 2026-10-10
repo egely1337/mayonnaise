@@ -15,6 +15,7 @@
 #include "painter.hpp"
 #include "popup.hpp"
 #include "theme.hpp"
+#include "video.hpp"
 #include "widget.hpp"
 #include "widgets/button.hpp"
 #include "widgets/checkbox.hpp"

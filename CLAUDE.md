@@ -173,6 +173,18 @@ Known issues / next steps:
   every stage drops stale packets/frames without locks across stages. Audio is the clock
   (`audioEnd - queuedSeconds`), the wall clock is used for silent files. Frames are converted to RGBA on the
   decode thread and uploaded with `ImageData::update` (copy-free move); 4K is downscaled to 2560 wide.
+- **Hardware decoding**: `setupHardware` picks the first device type (VAAPI, CUDA, Vulkan, VDPAU) that a decoder
+  for the stream supports — the default AV1 decoder is libdav1d (software only), so it iterates decoders for
+  one with a hw config. `get_format` falls back to software when the GPU refuses a stream (seen with a
+  portrait VP9 file); `decoderDescription()` reports it. `extra_hw_frames` covers the display queue, and the
+  frame on screen is kept alive so its surface isn't reused under the texture.
+- **Zero-copy**: VAAPI → `av_hwframe_map(DRM_PRIME)` → two single-plane EGL images (R8/GR88, or R16/GR1616 for
+  10-bit) bound with `glEGLImageTargetTexture2DOES`. Needs an EGL context, so SDL is forced to EGL on X11 too
+  (`MAYO_GLX=1` restores GLX; then playback uses copy-back). EGL/DRM constants are defined locally so the build
+  needs no EGL headers. The EGLImage is destroyed right after binding; the texture keeps the buffer.
+- **YUV matrix guessing**: untagged streams use BT.709 at ≥720p, BT.601 below (like mpv). FFmpeg's own test
+  encodes are BT.601 but untagged, so their colour bars look slightly off — that's the file, not the shader
+  (verified against FFmpeg's bt709 conversion within ±2).
 - **TSan on the video player** reports races inside FFmpeg's frame threads and PipeWire (uninstrumented
   atomics); none involve MediaPlayer's own state.
 - **Widget::setOpacity is a no-op when unchanged** — fades call it every frame from draw(), and an

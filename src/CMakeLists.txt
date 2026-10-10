@@ -16,6 +16,7 @@ add_library(mayonnaise
   render/painter.cpp
   render/renderer2d.cpp
   render/text_system.cpp
+  render/video_texture.cpp
   theme/theme.cpp
   widgets/button.cpp
   widgets/control.cpp

@@ -228,6 +228,8 @@ void PlatformWindow::setTextInputActive(bool active, Rect caretRect) {
 // ---------------------------------------------------------------------------------------------
 bool Platform::init() {
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+    // EGL on X11 too (Wayland always uses it): zero-copy video needs EGL dma-buf import.
+    if (!std::getenv("MAYO_GLX")) SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
     // Without this, the first click on an unfocused window is swallowed — macOS delivers it.
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
@@ -454,6 +456,10 @@ PlatformWindow* Platform::windowFromId(WindowId id) {
     auto it = g_windows.find(id);
     return it != g_windows.end() ? it->second : nullptr;
 }
+
+void* Platform::eglDisplay() { return SDL_EGL_GetCurrentDisplay(); }
+
+void* Platform::eglProcAddress(const char* name) { return reinterpret_cast<void*>(SDL_EGL_GetProcAddress(name)); }
 
 void* Platform::glProcAddress(const char* name) {
     return reinterpret_cast<void*>(SDL_GL_GetProcAddress(name));

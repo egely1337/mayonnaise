@@ -129,6 +129,9 @@ public:
     /// the user cancelled.
     static void showOpenDialog(PlatformWindow* parent, const std::vector<DialogFilter>& filters, bool folders,
                                bool multiple, std::function<void(std::vector<std::string>)> done);
+    /// EGL display of the shared GL context, or nullptr when the context isn't EGL (GLX).
+    static void* eglDisplay();
+    static void* eglProcAddress(const char* name);
     /// Valid once the first window (and with it the shared GL context) exists.
     static void* glProcAddress(const char* name);
 };

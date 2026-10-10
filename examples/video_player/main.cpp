@@ -165,7 +165,10 @@ public:
     std::function<void()> onTick;  // every rendered frame while playing (HUD time, end detection)
     std::string audioTitle;
 
-    void reset() { m_texture.reset(); }
+    void reset() {
+        m_texture.reset();
+        m_shown = {};
+    }
     [[nodiscard]] bool isInteractive() const override { return true; }
     [[nodiscard]] bool expandsContent(Axis /*axis*/) const override { return true; }
 
@@ -175,11 +178,15 @@ public:
         if (!m_player.isOpen()) return;
         MediaPlayer::Frame f;
         if (m_player.takeFrame(f)) {
-            if (!m_texture || m_texture->width() != f.width || m_texture->height() != f.height)
-                m_texture = ImageData::create(f.width, f.height);
-            m_texture->update(std::move(f.rgba), true);
+            if (!m_texture) m_texture = VideoTexture::create();
+            if (f.uploadTo(*m_texture)) {
+                // Keep the frame (and with it the decoder surface) alive while it's on screen.
+                m_shown = std::move(f);
+            } else {
+                m_player.disableZeroCopy();  // import failed: later frames come through system memory
+            }
         }
-        if (m_player.hasVideo() && m_texture) {
+        if (m_player.hasVideo() && m_texture && !m_texture->isEmpty()) {
             const auto aspect = static_cast<float>(m_player.aspect());
             float w = r.width;
             float h = w / aspect;
@@ -187,7 +194,7 @@ public:
                 h = r.height;
                 w = h * aspect;
             }
-            p.drawImage({r.center().x - w * 0.5f, r.center().y - h * 0.5f, w, h}, *m_texture);
+            p.drawVideo({r.center().x - w * 0.5f, r.center().y - h * 0.5f, w, h}, *m_texture);
         } else if (!m_player.hasVideo()) {
             // Audio only: a big note-like glyph and the title.
             const Theme& t = theme();
@@ -212,7 +219,8 @@ public:
 
 private:
     MediaPlayer& m_player;
-    std::shared_ptr<ImageData> m_texture;
+    std::shared_ptr<VideoTexture> m_texture;
+    MediaPlayer::Frame m_shown;
 };
 
 /// Root: video under everything (including the title bar), HUD floating at the bottom, empty state.
@@ -273,6 +281,7 @@ int main(int argc, char** argv) {
     auto speaker = std::make_shared<HudButton>(Icon::Speaker, 16);
     auto loop = std::make_shared<HudButton>(Icon::Repeat, 16);
     auto fullscreen = std::make_shared<HudButton>(Icon::Expand, 16);
+    auto infoButton = std::make_shared<HudButton>(Icon::Info, 16);
     auto volumeBar = std::make_shared<TrackBar>();
     volumeBar->setValue(1);
     volumeBar->setFixedWidth(84);
@@ -281,7 +290,7 @@ int main(int argc, char** argv) {
     auto remaining = Label("-0:00").font(TextStyle::Subheadline).foreground(Color::white(0.85f)).width(56).textAlign(TextAlign::Trailing);
 
     auto hudContent = VStack({
-                                 HStack({speaker, Element(volumeBar), Spacer(), back, play, forward, Spacer(), loop, fullscreen})
+                                 HStack({speaker, Element(volumeBar), Spacer(), back, play, forward, Spacer(), Element(infoButton), loop, fullscreen})
                                      .spacing(6)
                                      .align(Alignment::Center),
                                  HStack({elapsed, Element(timeline), remaining}).spacing(10).align(Alignment::Center),
@@ -364,6 +373,13 @@ int main(int argc, char** argv) {
         empty.setHidden(true);
         hud->setHidden(false);
         surface->audioTitle = player.title();
+        if (std::getenv("MAYO_VERBOSE")) {
+            // After a second of decoding, so a hardware → software fallback is visible too.
+            app.after(1.0, [&] {
+                std::fprintf(stderr, "video_player: %s — %s, %d dropped\n", player.codecDescription().c_str(),
+                             player.decoderDescription().c_str(), player.droppedFrames());
+            });
+        }
         window.setTitle(player.title());
         timeline->setValue(0);
         applyVolume();
@@ -399,6 +415,29 @@ int main(int argc, char** argv) {
         loop->setActive(looping);
     };
     fullscreen->onClick = toggleFullscreen;
+
+    // Playback info: what decodes the video, and whether frames are being dropped.
+    auto infoTitle = Label("").font(TextStyle::Headline).lineLimit(1).maxWidth(320);
+    auto infoCodec = Label("").secondary();
+    auto infoDecoder = Label("");
+    auto infoStats = Label("").secondary();
+    auto info = Popover(VStack({infoTitle, infoCodec, infoDecoder, infoStats}).spacing(4));
+    auto refreshInfo = [&] {
+        infoTitle.setText(player.title());
+        std::string codec = player.codecDescription();
+        if (player.frameRate() > 0) {
+            char fps[32];
+            std::snprintf(fps, sizeof fps, " · %.3g fps", player.frameRate());
+            codec += fps;
+        }
+        infoCodec.setText(codec);
+        infoDecoder.setText(player.decoderDescription());
+        infoStats.setText(std::to_string(player.droppedFrames()) + " dropped frames");
+    };
+    infoButton->onClick = [&] {
+        refreshInfo();
+        info.show(Element(infoButton), PopupEdge::Above);
+    };
     timeline->hoverLabel = [&](float f) { return formatTime(f * player.duration()); };
     timeline->onChange = [&](float v, bool /*final*/) {
         player.seek(v * player.duration());
@@ -418,6 +457,7 @@ int main(int argc, char** argv) {
         std::string r = "-" + formatTime(std::max(0.0, dur - pos));
         if (e != elapsed.text()) elapsed.setText(e);
         if (r != remaining.text()) remaining.setText(r);
+        if (info.isShown()) refreshInfo();
         if (player.isPlaying() && player.ended()) {
             // Defer: switching files from inside a draw would re-enter layout.
             app.post([&] {

@@ -41,6 +41,10 @@ public:
     /// Arc around `center`; angles in radians, 0 = +x, positive sweep is clockwise on screen.
     void arc(Point center, float radius, float startAngle, float sweep, const Color& color, float width);
     void image(const Rect& r, GLuint texture, const Rect& uv, const CornerRadii& radii, float opacity);
+    /// YUV frame: tex[0] = Y, tex[1] = UV (NV12) or U, tex[2] = V (I420) or 0. `matrix`: 0 = BT.601,
+    /// 1 = BT.709, 2 = BT.2020.
+    void video(const Rect& r, const GLuint (&tex)[3], bool planar, int matrix, bool fullRange,
+               const CornerRadii& radii, float opacity);
     /// Glyph quad already in device pixels (text is laid out on the pixel grid).
     void glyphPx(const Rect& px, GLuint atlas, const Rect& uv, const Color& color, float gamma);
     /// Blurs everything drawn so far and draws it, tinted, inside the shape.
@@ -75,7 +79,7 @@ private:
         float l, t, r, b;               // pixels, intersection of all clips
         float rl, rt, rr, rb, radius;   // innermost rounded clip
     };
-    enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc, Triangle };
+    enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc, Triangle, Video };
 
     Instance& push(Type type, float l, float t, float r, float b, GLuint texture);
     bool culled(float l, float t, float r, float b) const;
@@ -93,6 +97,9 @@ private:
     gl::Texture m_whiteTexture;
     GLint m_uViewport = -1;
     GLint m_uTexture = -1;
+    GLint m_uTexture1 = -1;
+    GLint m_uTexture2 = -1;
+    GLuint m_extraTextures[2] = {0, 0};  // units 1 and 2, only for video batches
 
     gl::RenderTarget m_scene;
     std::vector<gl::RenderTarget> m_blurChain;

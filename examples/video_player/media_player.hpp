@@ -5,6 +5,7 @@
 // Audio is the master clock (falls back to the wall clock for silent videos).
 
 #include <mayonnaise/audio.hpp>
+#include <mayonnaise/video.hpp>
 
 #include <atomic>
 #include <condition_variable>
@@ -19,15 +20,19 @@
 struct AVFormatContext;
 struct AVCodecContext;
 struct AVPacket;
+struct AVFrame;
+struct AVBufferRef;
 
 class MediaPlayer {
 public:
+    /// A decoded frame: CPU planes (NV12 / P010 / yuv420p) or a dma-buf mapping of a GPU surface.
+    /// Holding it keeps the decoder from reusing the surface, so keep the displayed frame alive.
     struct Frame {
-        std::vector<std::uint8_t> rgba;
-        int width = 0;
-        int height = 0;
+        std::shared_ptr<AVFrame> frame;
         double pts = 0;
         int serial = 0;
+        /// Uploads (or, for dma-buf frames, imports zero-copy) into `texture`. UI thread.
+        bool uploadTo(mayo::VideoTexture& texture) const;
     };
 
     MediaPlayer();
@@ -44,6 +49,15 @@ public:
     [[nodiscard]] bool hasAudio() const { return m_audioStream >= 0; }
     [[nodiscard]] int width() const { return m_outW; }
     [[nodiscard]] int height() const { return m_outH; }
+    /// "Hardware · VAAPI · zero-copy", "Software · 16 threads", ...
+    [[nodiscard]] std::string decoderDescription() const;
+    [[nodiscard]] double frameRate() const { return m_frameRate; }
+    [[nodiscard]] int droppedFrames() const { return m_dropped; }
+    /// Called when a dma-buf import failed: decode into system memory from now on.
+    void disableZeroCopy() { m_zeroCopy = false; }
+    // Used by the decoder's get_format callback.
+    [[nodiscard]] int hwPixelFormat() const { return m_hwFormat; }
+    void noteHardwareFallback() { m_hwFellBack = true; }
     /// Display aspect ratio (accounts for non-square pixels).
     [[nodiscard]] double aspect() const { return m_aspect; }
     [[nodiscard]] double duration() const { return m_duration; }
@@ -79,6 +93,7 @@ private:
         void clear();
     };
 
+    bool setupHardware(const struct AVCodec*& codec, int codecId);
     void demuxLoop();
     void videoLoop();
     void audioLoop();
@@ -89,6 +104,13 @@ private:
     AVCodecContext* m_audio = nullptr;
     int m_videoStream = -1;
     int m_audioStream = -1;
+    AVBufferRef* m_hwDevice = nullptr;
+    int m_hwFormat = -1;          // AVPixelFormat of hardware surfaces
+    std::string m_hwName;
+    std::atomic<bool> m_hwFellBack{false};
+    std::atomic<bool> m_zeroCopy{false};
+    std::atomic<int> m_dropped{0};
+    double m_frameRate = 0;
     int m_outW = 0;
     int m_outH = 0;
     double m_aspect = 16.0 / 9.0;

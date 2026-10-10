@@ -85,6 +85,7 @@ public:
     void show();
     void minimize();
     void toggleMaximize();
+    void setFullscreen(bool fullscreen);
     void setMinimumSize(int w, int h);
 
     void makeCurrent();

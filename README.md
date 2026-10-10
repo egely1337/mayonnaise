@@ -28,6 +28,23 @@ on worker threads; JPEG EXIF orientation is honoured.
 |---|---|
 | ![](docs/screenshots/photos-library.png) | ![](docs/screenshots/photos-viewer.png) |
 
+### Video player example
+
+`examples/video_player` is a QuickTime-style player: the video runs under the title bar, a dark Liquid
+Glass HUD floats at the bottom (play/pause, ±10 s, volume, loop, full screen, timeline with a time bubble)
+and the controls and title bar fade away after a few idle seconds. Decoding uses FFmpeg on background
+threads with audio as the master clock and frame-accurate seeking. Drop several files to queue them.
+
+```sh
+./build/examples/video_player/video_player movie.mp4
+```
+
+Keys: Space/K play-pause · ←/→ 5 s · J/L 10 s · ↑/↓ volume · M mute · F full screen · Ctrl+O open.
+It needs FFmpeg's development packages (`libavformat-dev libavcodec-dev libswscale-dev libswresample-dev`
+on Ubuntu, `ffmpeg-free-devel` on Fedora); without them CMake simply skips this example.
+
+![Video player](docs/screenshots/video-player.png)
+
 ## Hello World
 
 ```cpp
@@ -159,6 +176,9 @@ mayo::HStack({ name, save }).spacing(8).padding(12)
 - Images: `mayo::ImageData::load(path, maxDimension)` decodes off the UI thread (PNG, JPEG with EXIF
   orientation, GIF, BMP, TGA); `mayo::Image(data).contentMode(ContentMode::Fill)` displays it.
 - Touchpad pinch arrives as `Widget::onMagnify(const MagnifyEvent&)`.
+- Media: `mayo::AudioOutput` streams float PCM to the default device (thread-safe writes);
+  `ImageData::create(w, h)` + `update(pixels)` for frames that change every vsync;
+  `window.setFullscreen()`, `window.setChromeHidden()` (fades the title bar); `Painter::fillTriangle()`.
 - Custom drawing: `mayo::Canvas([](mayo::Painter& p, mayo::Rect r) { p.fillCircle(r.center(), 8, c); })`.
 - Custom widgets: subclass `mayo::Widget` (override `measureContent`, `arrangeContent`, `draw`, and the
   `onPointer…` / `onKey…` handlers), then use it with `mayo::Custom<MyWidget>(args...)` to get the

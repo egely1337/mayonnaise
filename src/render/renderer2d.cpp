@@ -237,6 +237,25 @@ void Renderer2D::line(Point a, Point b, const Color& color, float width) {
     in.params[1] = hw;
 }
 
+void Renderer2D::triangle(Point a, Point b, Point c, const Color& color, float cornerRadius) {
+    const float s = m_scale;
+    const float r = std::max(0.0f, cornerRadius) * s;
+    float l = std::min({a.x, b.x, c.x}) * s - r - 1;
+    float t = std::min({a.y, b.y, c.y}) * s - r - 1;
+    float rr = std::max({a.x, b.x, c.x}) * s + r + 1;
+    float bb = std::max({a.y, b.y, c.y}) * s + r + 1;
+    if (culled(l, t, rr, bb)) return;
+    Instance& in = push(Type::Triangle, l, t, rr, bb, 0);
+    in.shape[0] = a.x * s;
+    in.shape[1] = a.y * s;
+    in.shape[2] = b.x * s;
+    in.shape[3] = b.y * s;
+    in.uv[0] = c.x * s;
+    in.uv[1] = c.y * s;
+    in.uv[2] = r;
+    setColor(in.color, color);
+}
+
 void Renderer2D::arc(Point center, float radius, float startAngle, float sweep, const Color& color, float width) {
     const float s = m_scale;
     float hw = std::max(width * s * 0.5f, 0.5f);

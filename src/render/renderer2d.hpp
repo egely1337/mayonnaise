@@ -36,6 +36,8 @@ public:
     void fillGradient(const Rect& r, const CornerRadii& radii, const Color& from, const Color& to, Point p0, Point p1);
     void shadow(const Rect& r, float radius, const Color& color, float blur, Vec2 offset = {}, float spread = 0);
     void line(Point a, Point b, const Color& color, float width);
+    /// Filled triangle with optionally rounded corners (radius grows it outwards).
+    void triangle(Point a, Point b, Point c, const Color& color, float cornerRadius = 0);
     /// Arc around `center`; angles in radians, 0 = +x, positive sweep is clockwise on screen.
     void arc(Point center, float radius, float startAngle, float sweep, const Color& color, float width);
     void image(const Rect& r, GLuint texture, const Rect& uv, const CornerRadii& radii, float opacity);
@@ -73,7 +75,7 @@ private:
         float l, t, r, b;               // pixels, intersection of all clips
         float rl, rt, rr, rb, radius;   // innermost rounded clip
     };
-    enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc };
+    enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc, Triangle };
 
     Instance& push(Type type, float l, float t, float r, float b, GLuint texture);
     bool culled(float l, float t, float r, float b) const;

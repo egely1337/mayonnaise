@@ -4,6 +4,7 @@
 
 #include "animation.hpp"
 #include "app.hpp"
+#include "audio.hpp"
 #include "canvas.hpp"
 #include "color.hpp"
 #include "control.hpp"

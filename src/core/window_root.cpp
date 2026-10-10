@@ -203,8 +203,14 @@ void WindowRootView::setTitle(const std::string& title) {
     invalidateLayout();
 }
 
-void WindowRootView::setWindowState(bool maximized, bool key, bool transparent) {
-    m_maximized = maximized;
+void WindowRootView::setChromeHidden(bool hidden) {
+    m_chrome.animateTo(hidden ? 0.0f : 1.0f, now(), Transition{0.3f, Curve::EaseInOut});
+    invalidate();
+}
+
+void WindowRootView::setWindowState(bool maximized, bool key, bool transparent, bool fullscreen) {
+    m_fullscreen = fullscreen;
+    m_maximized = maximized || fullscreen;
     m_key = key;
     m_transparent = transparent;
     m_titleBar->key = key;
@@ -238,6 +244,9 @@ void WindowRootView::draw(Painter& p) {
     Rect bounds = frame();
     p.fillRoundedRect(bounds, radius, t.colors.windowBackground);
     p.pushClip(bounds, radius);
+    // Chrome can be faded out (media playback); fully hidden in fullscreen, like macOS.
+    const float chrome = m_fullscreen ? 0.0f : sample(m_chrome);
+    m_titleBar->setOpacity(chrome);
     paintChildren(p);
     p.popClip();
 }

@@ -27,6 +27,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/examples/gallery/gallery
 ./build/examples/settings_app/settings_app
 ./build/examples/photos/photos <images or folders...>
+./build/examples/video_player/video_player <media files...>   # only built when FFmpeg dev libs exist
 
 # tests
 ctest --test-dir build --output-on-failure
@@ -38,7 +39,9 @@ MAYO_SCREENSHOT=/tmp/shot.png MAYO_SCREENSHOT_FRAMES=10 ./build/examples/gallery
 Useful environment variables:
 - `MAYO_SCREENSHOT=<file.png>` / `MAYO_SCREENSHOT_FRAMES=<n>` / `MAYO_SCREENSHOT_DELAY=<s>` — save the first window after n frames (and at least s seconds, default 0.4) and quit.
 - `MAYO_DEMO=picker|menu|popover|<page>` (gallery) / `MAYO_DEMO=scroll` (settings_app) /
-  `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) — drive the examples at startup for screenshots.
+  `MAYO_DEMO=viewer:N|zoom:N|favorite|open` (photos) / `MAYO_DEMO=seek:<s>` (video_player) — drive the
+  examples at startup for screenshots.
+- `MAYO_VERBOSE=2` — also print frames per second (find widgets that never stop requesting frames).
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
 - `MAYO_SCALE=<float>` — override the UI scale factor (HiDPI testing).
@@ -165,6 +168,17 @@ Known issues / next steps:
   `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
 ## Gotchas
+
+- **Video player threading**: demux, video decode and audio decode threads; seeking bumps a serial number so
+  every stage drops stale packets/frames without locks across stages. Audio is the clock
+  (`audioEnd - queuedSeconds`), the wall clock is used for silent files. Frames are converted to RGBA on the
+  decode thread and uploaded with `ImageData::update` (copy-free move); 4K is downscaled to 2560 wide.
+- **TSan on the video player** reports races inside FFmpeg's frame threads and PipeWire (uninstrumented
+  atomics); none involve MediaPlayer's own state.
+- **Widget::setOpacity is a no-op when unchanged** — fades call it every frame from draw(), and an
+  unconditional invalidate() kept the window rendering forever.
+- **Full screen is applied asynchronously by the compositor**; track the requested state yourself instead of
+  reading `isFullscreen()` right after `setFullscreen()`.
 
 - **File dialogs answer on SDL's terms** (portal reply during event pumping, zenity on a helper thread);
   `App::openFiles` always hops back with `post()`, which is why `post()`/`after()` are mutex-protected.

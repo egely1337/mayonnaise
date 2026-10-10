@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -57,6 +58,9 @@ void Window::setTitle(const std::string& title) {
 const std::string& Window::title() const { return m_impl->title; }
 Size Window::size() const { return m_impl->platformWindow->sizeInPoints(); }
 void Window::close() { m_impl->closed = true; }
+void Window::setFullscreen(bool fullscreen) { m_impl->platformWindow->setFullscreen(fullscreen); }
+bool Window::isFullscreen() const { return m_impl->platformWindow->isFullscreen(); }
+void Window::setChromeHidden(bool hidden) { m_impl->root->setChromeHidden(hidden); }
 
 // --- Impl ---------------------------------------------------------------------------------------
 
@@ -263,8 +267,8 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
 void Window::Impl::layout() {
     needsLayout = false;
     Size size = platformWindow->sizeInPoints();
-    root->setWindowState(platformWindow->isMaximized() || platformWindow->isFullscreen(), keyWindow,
-                         platformWindow->isTransparent());
+    root->setWindowState(platformWindow->isMaximized(), keyWindow, platformWindow->isTransparent(),
+                         platformWindow->isFullscreen());
     root->measure(size);
     root->arrange({0, 0, size.width, size.height});
     for (auto& overlay : dispatcher.overlays()) {
@@ -346,6 +350,21 @@ void Window::Impl::render() {
     }
     r.endFrame();
     inFrame = false;
+    // MAYO_VERBOSE=2: frames per second, to spot widgets that keep requesting frames.
+    static const bool countFrames = [] {
+        const char* v = std::getenv("MAYO_VERBOSE");
+        return v && std::string(v) == "2";
+    }();
+    if (countFrames) {
+        static int frames = 0;
+        static double since = frameTime;
+        ++frames;
+        if (frameTime - since >= 1.0) {
+            std::fprintf(stderr, "mayonnaise: %d fps, %d draw calls\n", frames, r.drawCallsLastFrame());
+            frames = 0;
+            since = frameTime;
+        }
+    }
     platformWindow->swapBuffers();
 }
 

@@ -40,6 +40,7 @@ public:
     void fillVerticalGradient(const Rect& r, const CornerRadii& radii, const Color& top, const Color& bottom);
     void drawShadow(const Rect& r, float radius, const Color& color, float blur, Vec2 offset = {}, float spread = 0);
     void drawLine(Point a, Point b, const Color& color, float width = 1);
+    void fillTriangle(Point a, Point b, Point c, const Color& color, float cornerRadius = 0);
     void drawArc(Point center, float radius, float startAngle, float sweep, const Color& color, float width = 1);
     /// A macOS-style accent focus ring hugging the outside of the shape.
     void drawFocusRing(const Rect& r, const CornerRadii& radii, float progress = 1);

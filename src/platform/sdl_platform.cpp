@@ -196,6 +196,8 @@ void PlatformWindow::toggleMaximize() {
     else
         SDL_MaximizeWindow(m_impl->window);
 }
+void PlatformWindow::setFullscreen(bool fullscreen) { SDL_SetWindowFullscreen(m_impl->window, fullscreen); }
+
 void PlatformWindow::setMinimumSize(int w, int h) {
     float k = pointsPerWindowUnit();
     SDL_SetWindowMinimumSize(m_impl->window, static_cast<int>(static_cast<float>(w) / k),
@@ -280,6 +282,8 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
         case SDL_EVENT_WINDOW_FOCUS_LOST: out.type = EventType::WindowFocusLost; break;
         case SDL_EVENT_WINDOW_MAXIMIZED: out.type = EventType::WindowMaximized; break;
         case SDL_EVENT_WINDOW_RESTORED: out.type = EventType::WindowRestored; break;
+        case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+        case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN: out.type = EventType::WindowResized; break;
         case SDL_EVENT_WINDOW_MINIMIZED: out.type = EventType::WindowMinimized; break;
         case SDL_EVENT_WINDOW_MOUSE_LEAVE: out.type = EventType::MouseLeave; break;
         case SDL_EVENT_MOUSE_MOTION:

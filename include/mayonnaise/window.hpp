@@ -30,6 +30,10 @@ public:
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;
     void close();
+    void setFullscreen(bool fullscreen);
+    [[nodiscard]] bool isFullscreen() const;
+    /// Fades the title bar (traffic lights, title, toolbar) out or back in — for media playback.
+    void setChromeHidden(bool hidden);
 
     struct Impl;
     [[nodiscard]] Impl& impl() { return *m_impl; }

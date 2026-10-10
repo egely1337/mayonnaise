@@ -8,6 +8,7 @@ add_library(mayonnaise
   core/widget.cpp
   core/window.cpp
   core/window_root.cpp
+  platform/sdl_audio.cpp
   platform/sdl_platform.cpp
   render/gl.cpp
   render/font.cpp

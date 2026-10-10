@@ -50,6 +50,10 @@ void Painter::drawShadow(const Rect& r, float radius, const Color& color, float 
 
 void Painter::drawLine(Point a, Point b, const Color& color, float width) { m_renderer.line(a, b, color, width); }
 
+void Painter::fillTriangle(Point a, Point b, Point c, const Color& color, float cornerRadius) {
+    m_renderer.triangle(a, b, c, color, cornerRadius);
+}
+
 void Painter::drawArc(Point center, float radius, float startAngle, float sweep, const Color& color, float width) {
     m_renderer.arc(center, radius, startAngle, sweep, color, width);
 }

@@ -262,7 +262,9 @@ void Widget::setHidden(bool hidden) {
     invalidateLayout();
 }
 void Widget::setOpacity(float opacity) {
-    m_opacity = std::clamp(opacity, 0.0f, 1.0f);
+    opacity = std::clamp(opacity, 0.0f, 1.0f);
+    if (opacity == m_opacity) return;  // called per frame by fades; don't schedule redundant frames
+    m_opacity = opacity;
     invalidate();
 }
 void Widget::setTooltip(std::string text) { m_tooltip = std::move(text); }

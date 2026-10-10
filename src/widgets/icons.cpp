@@ -309,6 +309,71 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.line(6, 8.5f, 11, 8.5f);
             if (icon == Icon::ZoomIn) pen.line(8.5f, 6, 8.5f, 11);
             break;
+        case Icon::Play: pen.p.fillTriangle(pen.at(6, 3.5f), pen.at(16.5f, 10), pen.at(6, 16.5f), color, 1.2f * u); break;
+        case Icon::Pause:
+            pen.fillRect(4.8f, 3.5f, 3.6f, 13, 1.2f);
+            pen.fillRect(11.6f, 3.5f, 3.6f, 13, 1.2f);
+            break;
+        case Icon::Backward:
+        case Icon::Forward: {
+            // Two touching triangles (⏪ / ⏩).
+            const bool fwd = icon == Icon::Forward;
+            auto tri = [&](float x0, float x1) {
+                if (!fwd) std::swap(x0, x1);
+                pen.p.fillTriangle(pen.at(x0, 5), pen.at(x1, 10), pen.at(x0, 15), color, 0.8f * u);
+            };
+            tri(2.5f, 10);
+            tri(10, 17.5f);
+            break;
+        }
+        case Icon::SkipBack:
+        case Icon::SkipForward: {
+            // Open circle with an arrowhead at the top and "10" inside (jump back / forward 10 s).
+            const bool fwd = icon == Icon::SkipForward;
+            // The back glyph mirrors the forward one: angle θ maps to 180° − θ.
+            pen.arc(10, 10.5f, 7.2f, fwd ? -50.0f : -80.0f, 310.0f);
+            const float tipX = fwd ? 12.6f : 7.4f;
+            const float dir = fwd ? -1.0f : 1.0f;
+            pen.p.fillTriangle(pen.at(tipX + dir * 3.6f, 0.9f), pen.at(tipX + dir * 3.6f, 5.7f), pen.at(tipX, 3.3f), color,
+                               0.25f * u);
+            Font f{8.2f * u, FontWeight::Semibold, 9.0f * u};
+            drawText("10", Rect{pen.origin.x, pen.origin.y + 6.0f * u, 20 * u, 9.5f * u}, f, color, TextAlign::Center);
+            break;
+        }
+        case Icon::Expand:
+            pen.poly({{3.5f, 8}, {3.5f, 3.5f}, {8, 3.5f}});
+            pen.poly({{12, 16.5f}, {16.5f, 16.5f}, {16.5f, 12}});
+            pen.line(3.5f, 3.5f, 8.5f, 8.5f);
+            pen.line(16.5f, 16.5f, 11.5f, 11.5f);
+            break;
+        case Icon::Contract:
+            pen.poly({{4, 8.5f}, {8.5f, 8.5f}, {8.5f, 4}});
+            pen.poly({{11.5f, 16}, {11.5f, 11.5f}, {16, 11.5f}});
+            pen.line(3, 3, 8.5f, 8.5f);
+            pen.line(17, 17, 11.5f, 11.5f);
+            break;
+        case Icon::SpeakerSlash:
+            pen.poly({{3, 8}, {6, 8}, {10, 4.5f}, {10, 15.5f}, {6, 12}, {3, 12}}, true);
+            pen.line(12.5f, 7.5f, 17.5f, 12.5f);
+            pen.line(17.5f, 7.5f, 12.5f, 12.5f);
+            break;
+        case Icon::Film:
+            pen.rrect(3, 2.5f, 14, 15, 2);
+            pen.line(6.5f, 2.5f, 6.5f, 17.5f);
+            pen.line(13.5f, 2.5f, 13.5f, 17.5f);
+            pen.line(3, 10, 6.5f, 10);
+            pen.line(13.5f, 10, 17, 10);
+            pen.line(3, 6.2f, 6.5f, 6.2f);
+            pen.line(3, 13.8f, 6.5f, 13.8f);
+            pen.line(13.5f, 6.2f, 17, 6.2f);
+            pen.line(13.5f, 13.8f, 17, 13.8f);
+            break;
+        case Icon::Repeat:
+            pen.poly({{4, 9}, {4, 6}, {15, 6}});
+            pen.poly({{12.5f, 3.5f}, {15, 6}, {12.5f, 8.5f}});
+            pen.poly({{16, 11}, {16, 14}, {5, 14}});
+            pen.poly({{7.5f, 11.5f}, {5, 14}, {7.5f, 16.5f}});
+            break;
         case Icon::Pencil:
             pen.poly({{13.5f, 3}, {17, 6.5f}, {7, 16.5f}, {3, 17}, {3.5f, 13}}, true);
             pen.line(11.5f, 5, 15, 8.5f);

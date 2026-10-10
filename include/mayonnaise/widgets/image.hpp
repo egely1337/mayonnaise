@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "../widget.hpp"
 
@@ -19,6 +20,13 @@ public:
     static std::shared_ptr<ImageData> decode(std::span<const std::uint8_t> encoded);
     /// Straight-alpha RGBA8, row-major, top row first.
     static std::shared_ptr<ImageData> fromPixels(int width, int height, std::span<const std::uint8_t> rgba);
+
+    /// A blank image whose pixels are replaced with update() (video frames, live previews).
+    static std::shared_ptr<ImageData> create(int width, int height);
+    /// Replaces the pixels (RGBA8, width*height*4 bytes, top row first). Takes ownership to avoid a copy.
+    /// `premultiplied` = true skips the alpha conversion (opaque video frames). The texture is re-uploaded
+    /// on the next draw. UI thread only.
+    void update(std::vector<std::uint8_t> rgba, bool premultiplied = false);
 
     ~ImageData();
     ImageData(const ImageData&) = delete;

@@ -19,6 +19,8 @@ struct ImageData::Impl {
     int originalW = 0;
     int originalH = 0;
     bool retain = true;
+    bool dynamic = false;  // updated every frame: no mipmaps, sub-image uploads
+    bool dirty = false;
 
     void fit(int maxDim) {
         originalW = pixels.width;
@@ -31,7 +33,16 @@ struct ImageData::Impl {
     GLuint texture = 0;
 
     GLuint textureId() {
+        if (texture && dirty && !pixels.pixels.empty()) {
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, pixels.width, pixels.height, GL_RGBA, GL_UNSIGNED_BYTE,
+                            pixels.pixels.data());
+            dirty = false;
+            return texture;
+        }
         if (texture || pixels.pixels.empty()) return texture;
+        dirty = false;
         // Clamp to what the GPU can sample (rare: > 16k photos).
         GLint maxSize = 4096;
         glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
@@ -45,8 +56,12 @@ struct ImageData::Impl {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pixels.width, pixels.height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                      pixels.pixels.data());
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        if (dynamic) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        } else {
+            glGenerateMipmap(GL_TEXTURE_2D);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        }
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -72,6 +87,34 @@ std::shared_ptr<ImageData> ImageData::load(const std::string& path, int maxDimen
 }
 
 void ImageData::setRetainPixels(bool retain) { m_impl->retain = retain; }
+
+std::shared_ptr<ImageData> ImageData::create(int width, int height) {
+    if (width <= 0 || height <= 0) return nullptr;
+    std::shared_ptr<ImageData> img(new ImageData());
+    auto& d = img->m_impl->pixels;
+    d.width = width;
+    d.height = height;
+    d.pixels.assign(static_cast<size_t>(width) * height * 4, 0);
+    for (size_t i = 3; i < d.pixels.size(); i += 4) d.pixels[i] = 255;
+    img->m_impl->dynamic = true;
+    img->m_impl->fit(0);
+    return img;
+}
+
+void ImageData::update(std::vector<std::uint8_t> rgba, bool premultiplied) {
+    auto& d = m_impl->pixels;
+    if (rgba.size() != static_cast<size_t>(d.width) * d.height * 4) return;
+    if (!premultiplied) {
+        for (size_t i = 0; i < rgba.size(); i += 4) {
+            unsigned a = rgba[i + 3];
+            for (size_t c = 0; c < 3; ++c) rgba[i + c] = static_cast<std::uint8_t>((rgba[i + c] * a + 127) / 255);
+        }
+    }
+    d.pixels = std::move(rgba);
+    m_impl->dynamic = true;
+    m_impl->retain = true;
+    m_impl->dirty = true;
+}
 
 std::shared_ptr<ImageData> ImageData::scaledToFit(int maxDimension) const {
     if (m_impl->pixels.pixels.empty()) return nullptr;

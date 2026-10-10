@@ -20,7 +20,8 @@ public:
     void setContent(std::shared_ptr<Widget> content);
     void setToolbar(std::shared_ptr<Widget> toolbar);
     void setTitle(const std::string& title);
-    void setWindowState(bool maximized, bool key, bool transparent);
+    void setWindowState(bool maximized, bool key, bool transparent, bool fullscreen = false);
+    void setChromeHidden(bool hidden);
     [[nodiscard]] float windowRadius() const;
     [[nodiscard]] float titleBarHeight() const;
     [[nodiscard]] bool isKey() const { return m_key; }
@@ -41,6 +42,8 @@ private:
     bool m_maximized = false;
     bool m_key = true;
     bool m_transparent = true;
+    bool m_fullscreen = false;
+    Animated<float> m_chrome{1.0f};
 };
 
 }  // namespace mayo

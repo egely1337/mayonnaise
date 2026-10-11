@@ -40,6 +40,7 @@ enum class EventType : std::uint8_t {
     WindowClose, WindowResized, WindowScaleChanged, WindowExposed,
     WindowFocusGained, WindowFocusLost, WindowMaximized, WindowRestored, WindowMinimized,
     MouseMove, MouseDown, MouseUp, MouseLeave, Scroll,
+    ScrollEnd,           // the fingers left the touchpad (only where the platform reports it)
     KeyDown, KeyUp, TextInput,
     DropFile, DropPosition, DropComplete,
     Pinch,
@@ -54,6 +55,7 @@ struct PlatformEvent {
     Point position;            // window coordinates (points)
     Vec2 delta;                // scroll delta (points)
     bool precise = false;
+    bool scrollEnds = false;   // a ScrollEnd event will follow this touchpad gesture
     MouseButton button = MouseButton::None;
     int clicks = 0;
     Key key = Key::Unknown;
@@ -92,6 +94,7 @@ public:
     void toggleMaximize();
     void setFullscreen(bool fullscreen);
     void setMinimumSize(int w, int h);
+    void setSize(int w, int h);  // points
 
     void makeCurrent();
     void swapBuffers();

@@ -80,6 +80,15 @@ void Window::Impl::rememberFrame() {
     s.set(key + "width", static_cast<int>(std::lround(size.width)));
     s.set(key + "height", static_cast<int>(std::lround(size.height)));
 }
+void Window::setSize(Size size) {
+    if (m_impl->platformWindow->isMaximized() || m_impl->platformWindow->isFullscreen()) return;
+    m_impl->platformWindow->setSize(static_cast<int>(std::lround(size.width)), static_cast<int>(std::lround(size.height)));
+}
+
+void Window::setMinimumSize(Size size) {
+    m_impl->platformWindow->setMinimumSize(static_cast<int>(std::lround(size.width)), static_cast<int>(std::lround(size.height)));
+}
+
 void Window::setFullscreen(bool fullscreen) { m_impl->platformWindow->setFullscreen(fullscreen); }
 bool Window::isFullscreen() const { return m_impl->platformWindow->isFullscreen(); }
 void Window::setTitleVisible(bool visible) { m_impl->root->setTitleVisible(visible); }
@@ -247,6 +256,7 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
             ScrollEvent e;
             e.position = event.position;
             e.precise = event.precise;
+            e.reportsEnd = event.scrollEnds;
             e.delta = event.delta * (event.precise ? kPreciseStep : kWheelStep);
             e.modifiers = event.modifiers;
             // Shift+wheel scrolls horizontally, as on macOS.
@@ -255,6 +265,15 @@ void Window::Impl::handleEvent(const platform::PlatformEvent& event) {
             }
             dispatcher.scroll(e);
             updateCursor();
+            break;
+        }
+        case EventType::ScrollEnd: {
+            ScrollEvent e;
+            e.position = pointer;
+            e.precise = true;
+            e.phase = ScrollPhase::Ended;
+            e.reportsEnd = true;
+            dispatcher.scroll(e);
             break;
         }
         case EventType::KeyDown: {
@@ -386,10 +405,14 @@ void Window::Impl::render() {
     if (countFrames) {
         static int frames = 0;
         static double since = frameTime;
+        static double busy = 0;  // CPU time spent building frames (layout + draw, not the swap)
         ++frames;
+        busy += platform::Platform::now() - frameTime;
         if (frameTime - since >= 1.0) {
-            std::fprintf(stderr, "mayonnaise: %d fps, %d draw calls\n", frames, r.drawCallsLastFrame());
+            std::fprintf(stderr, "mayonnaise: %d fps, %d draw calls, %.2f ms/frame\n", frames, r.drawCallsLastFrame(),
+                         busy * 1000.0 / frames);
             frames = 0;
+            busy = 0;
             since = frameTime;
         }
     }

@@ -41,11 +41,20 @@ struct PointerEvent {
     Modifiers modifiers = Modifiers::None;
 };
 
+enum class ScrollPhase : std::uint8_t {
+    Changed,  ///< movement (wheel notch or touchpad delta)
+    Ended,    ///< the fingers left the touchpad (delta is zero); only sent when `reportsEnd` was set
+};
+
 struct ScrollEvent {
     Point position;
     Vec2 delta;                  ///< points; positive y scrolls content up (towards the end)
     bool precise = false;        ///< true for touchpads (continuous deltas), false for wheel notches
     Modifiers modifiers = Modifiers::None;
+    ScrollPhase phase = ScrollPhase::Changed;
+    /// The platform tells when this touchpad gesture ends (an Ended event follows), so widgets don't have
+    /// to guess from a pause in the events.
+    bool reportsEnd = false;
 };
 
 /// Touchpad pinch. `scale` is the change since the previous event (>1 = zoom in).

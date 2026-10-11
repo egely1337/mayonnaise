@@ -110,6 +110,27 @@ TEST_CASE("Keys go to the focused widget; scroll bubbles from the hit widget") {
     CHECK(f.a->scrolls == 1);
 }
 
+TEST_CASE("A touchpad gesture stays with the widget that took its first event") {
+    Fixture f;
+    auto ev = [](float y, ScrollPhase phase = ScrollPhase::Changed) {
+        return ScrollEvent{{10, y}, {0, 5}, true, Modifiers::None, phase, true};
+    };
+    f.d().scroll(ev(10));
+    f.host.clock += 0.01;
+    f.d().scroll(ev(60));  // the pointer is over b now, but the gesture started on a
+    CHECK(f.a->scrolls == 2);
+    CHECK(f.b->scrolls == 0);
+    f.d().scroll(ev(60, ScrollPhase::Ended));
+    CHECK(f.a->scrolls == 3);
+    f.host.clock += 0.01;
+    f.d().scroll(ev(60));  // a new gesture hit-tests again
+    CHECK(f.b->scrolls == 1);
+    // Without end events, a pause ends the latch.
+    f.host.clock += 0.5;
+    f.d().scroll(ScrollEvent{{10, 10}, {0, 5}, true, Modifiers::None});
+    CHECK(f.a->scrolls == 4);
+}
+
 TEST_CASE("Overlays are modal and dismiss on outside click") {
     Fixture f;
     auto overlay = std::make_shared<Probe>(Size{50, 50});

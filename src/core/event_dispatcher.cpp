@@ -162,8 +162,30 @@ void EventDispatcher::pointerLeave() {
 
 void EventDispatcher::scroll(const ScrollEvent& e) {
     m_lastPointer = e.position;
+    // Events of one gesture arrive a few ms apart; without end events a pause this long starts a new one.
+    // With them, the gap only guards against an end event that never came.
+    constexpr double kLatchGap = 0.25;
+    constexpr double kLatchGapWithEnds = 1.0;
+    const double t = m_root && m_root->host() ? m_root->host()->time() : 0.0;
+    auto latched = m_scrollLatch.lock();
+    if (latched && !attached(latched.get())) latched.reset();
+    if (e.precise && latched && (e.phase == ScrollPhase::Ended || t - m_scrollLatchTime < (e.reportsEnd ? kLatchGapWithEnds : kLatchGap))) {
+        if (latched->isEnabled()) latched->onScroll(e);
+        m_scrollLatchTime = t;
+        if (e.phase == ScrollPhase::Ended) m_scrollLatch.reset();
+        refreshHover();
+        return;
+    }
+    m_scrollLatch.reset();
+    if (e.phase == ScrollPhase::Ended) return;  // nobody is tracking this gesture
     for (Widget* w = hitTest(e.position); w; w = w->parent()) {
-        if (w->isEnabled() && w->onScroll(e)) break;
+        if (w->isEnabled() && w->onScroll(e)) {
+            if (e.precise) {
+                m_scrollLatch = w->weak_from_this();
+                m_scrollLatchTime = t;
+            }
+            break;
+        }
     }
     refreshHover();
 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -15,6 +16,8 @@ constexpr float kPadX = 6;
 constexpr float kPadY = 3;
 constexpr double kBlinkPeriod = 0.53;
 constexpr double kBlinkTimeout = 30;  // stop blinking (and waking the CPU) after this much idle time
+constexpr size_t kOutputChunk = 64 * 1024;
+constexpr double kOutputBudget = 0.008;  // seconds of parsing per event-loop pass; then draw and take input
 
 size_t encodeUtf8(char32_t cp, char* out) {
     if (cp < 0x80) {
@@ -101,6 +104,8 @@ bool boxLines(char32_t cp, BoxLines& b) {
 TerminalView::TerminalView(App& app, std::shared_ptr<Config> config)
     : m_app(app), m_config(std::move(config)), m_screen(80, 24, m_config->scrollback), m_pty(app) {
     setCursor(mayo::CursorShape::IBeam);
+    m_physics.setAxes(false, true);
+    m_physics.setBouncesWhenFitting(false, true);
     m_screen.respond = [this](const std::string& reply) { m_pty.write(reply); };
     m_screen.onBell = [this] {
         if (!m_config->visualBell) return;
@@ -176,6 +181,7 @@ void TerminalView::updateMetrics(float scale) {
     m_cellH = std::max(1.0f, std::round(natural * m_config->lineSpacing * scale)) / scale;
     const float extra = m_cellH - natural;
     m_baseline = std::round((lm.ascender + extra * 0.5f) * scale) / scale;
+    scrollToLines(m_scrollOffset, false);  // the physics works in points; keep the same lines in view
 }
 
 void TerminalView::arrangeContent(const Rect& content) {
@@ -192,7 +198,7 @@ void TerminalView::updateGrid() {
     if (cols == m_screen.cols() && rows == m_screen.rows()) return;
     m_screen.resize(cols, rows);
     m_selection.active = false;
-    m_scrollOffset = std::min(m_scrollOffset, m_screen.scrollbackSize());
+    scrollToLines(std::min(m_scrollOffset, m_screen.scrollbackSize()), false);
     if (m_started) {
         m_pty.resize(cols, rows, static_cast<int>(std::lround(m_cellW * m_scale * static_cast<float>(cols))),
                      static_cast<int>(std::lround(m_cellH * m_scale * static_cast<float>(rows))));
@@ -203,28 +209,84 @@ void TerminalView::updateGrid() {
 // --- output & input ----------------------------------------------------------------------------------
 
 void TerminalView::output() {
-    const std::string data = m_pty.takeOutput();
-    if (data.empty()) return;
     const int before = m_screen.scrollbackSize();
     const auto droppedBefore = m_screen.droppedLines();
-    m_screen.feed(data);
-    if (m_scrollOffset > 0) {
-        // Keep the history the user is reading in place while new output arrives.
-        const auto added = static_cast<int>(m_screen.scrollbackSize() - before) +
-                           static_cast<int>(m_screen.droppedLines() - droppedBefore);
-        m_scrollOffset = std::clamp(m_scrollOffset + added, 0, m_screen.scrollbackSize());
+    // Parse in slices: a flood (`cat huge.log`, a noisy build) must not freeze drawing and typing. Whatever
+    // doesn't fit in the budget continues on the next pass of the event loop, after a frame.
+    const auto start = std::chrono::steady_clock::now();
+    const auto budget = std::chrono::duration<double>(kOutputBudget);
+    bool more = false;
+    bool any = false;
+    do {
+        const std::string data = m_pty.takeOutput(kOutputChunk, more);
+        if (data.empty()) break;
+        m_screen.feed(data);
+        any = true;
+    } while (more && std::chrono::steady_clock::now() - start < budget);
+    if (more) {
+        std::weak_ptr<Widget> weak = weak_from_this();
+        m_app.post([this, weak] {
+            if (weak.lock()) output();
+        });
+    }
+    if (!any) return;
+
+    const int grew = m_screen.scrollbackSize() - before;
+    const auto dropped = static_cast<float>(m_screen.droppedLines() - droppedBefore);
+    if (grew != 0 || dropped != 0) {
+        const float backPx = m_physics.maxOffset().y - m_physics.offset().y;
+        updateScrollLimits();
+        // At the live end the view follows the output; while reading history, the history stays put.
+        if (backPx <= 0.5f) m_physics.shift({0, static_cast<float>(grew) * m_cellH});
+        else m_physics.shift({0, -dropped * m_cellH});
+        if (!m_physics.isAnimating()) m_physics.setOffset(m_physics.offset());
+        syncScroll();
     }
     m_blinkStart = now();
     invalidate();
 }
 
+void TerminalView::updateScrollLimits() {
+    const float rowsH = static_cast<float>(m_screen.rows()) * m_cellH;
+    m_physics.setLimits({0, static_cast<float>(m_screen.scrollbackSize()) * m_cellH}, {frame().width, rowsH});
+}
+
+void TerminalView::syncScroll() {
+    const int history = m_screen.scrollbackSize();
+    const float back = m_physics.maxOffset().y - m_physics.offset().y;
+    const int lines = std::clamp(static_cast<int>(std::ceil(back / m_cellH - 0.001f)), 0, history);
+    const float scale = m_scale > 0 ? m_scale : 1.0f;
+    m_scrollOffset = lines;
+    m_scrollShift = std::round((back - static_cast<float>(lines) * m_cellH) * scale) / scale;
+}
+
+void TerminalView::scrollToLines(int linesBack, bool animated) {
+    updateScrollLimits();
+    const float y = m_physics.maxOffset().y - static_cast<float>(std::max(0, linesBack)) * m_cellH;
+    m_physics.scrollTo({0, y}, animated, now());
+    syncScroll();
+    if (animated) {
+        m_lastScroll = now();
+        requestAnimationFrame();
+    }
+    invalidate();
+}
+
+void TerminalView::stepScroll(double t) {
+    if (!m_physics.isAnimating()) return;
+    if (m_physics.step(t)) {
+        m_lastScroll = t;
+        requestAnimationFrame();
+    } else if (auto* h = host(); h && m_physics.deadline() >= 0) {
+        h->scheduleFrame(m_physics.deadline());
+    }
+    syncScroll();
+}
+
 void TerminalView::send(std::string_view bytes) { m_pty.write(bytes); }
 
 void TerminalView::userInput() {
-    if (m_scrollOffset != 0) {
-        m_scrollOffset = 0;
-        invalidate();
-    }
+    if (m_scrollOffset != 0 || m_scrollShift != 0) scrollToLines(0, false);
     m_blinkStart = now();
     invalidate();
 }
@@ -247,9 +309,7 @@ bool TerminalView::onKeyDown(const KeyEvent& e) {
         else if (e.key == Key::End) offset = 0;
         else offset = -1;
         if (offset >= 0 || e.key == Key::PageDown) {
-            m_scrollOffset = std::clamp(offset, 0, m_screen.scrollbackSize());
-            m_lastScroll = now();
-            invalidate();
+            scrollToLines(std::clamp(offset, 0, m_screen.scrollbackSize()), true);
             return true;
         }
     }
@@ -387,7 +447,7 @@ void TerminalView::selectAll() {
 
 void TerminalView::clearScrollback() {
     m_screen.clearScrollback();
-    m_scrollOffset = 0;
+    scrollToLines(0, false);
     m_selection.active = false;
     invalidate();
 }
@@ -404,7 +464,7 @@ const Line* TerminalView::lineGlobal(std::int64_t line) const {
 
 TerminalView::Pos TerminalView::cellAt(Point p, bool clampToGrid) const {
     int col = static_cast<int>(std::floor((p.x - m_origin.x) / m_cellW));
-    int row = static_cast<int>(std::floor((p.y - m_origin.y) / m_cellH));
+    int row = static_cast<int>(std::floor((p.y - m_origin.y - m_scrollShift) / m_cellH));
     if (clampToGrid) {
         col = std::clamp(col, 0, m_screen.cols() - 1);
         row = std::clamp(row, 0, m_screen.rows() - 1);
@@ -540,7 +600,7 @@ bool TerminalView::reportsMouse(Modifiers mods) const {
 }
 
 void TerminalView::sendMouse(int button, bool press, bool motion, Point p, Modifiers mods) {
-    m_scrollOffset = 0;
+    if (m_scrollOffset != 0 || m_scrollShift != 0) scrollToLines(0, false);
     const Pos c = cellAt(p);
     const int row = static_cast<int>(c.line - topLine());
     int cb = button;
@@ -612,8 +672,8 @@ void TerminalView::onPointerMove(const PointerEvent& e) {
     if (!m_selecting || !isPressed()) return;
     // Dragging past the top or bottom edge scrolls the history.
     const Rect r = frame();
-    if (e.position.y < r.y && m_scrollOffset < m_screen.scrollbackSize()) ++m_scrollOffset;
-    else if (e.position.y > r.bottom() && m_scrollOffset > 0) --m_scrollOffset;
+    if (e.position.y < r.y && m_scrollOffset < m_screen.scrollbackSize()) scrollToLines(m_scrollOffset + 1, false);
+    else if (e.position.y > r.bottom() && m_scrollOffset > 0) scrollToLines(m_scrollOffset - 1, false);
     Pos c = cellAt(e.position);
     if (e.position.x > m_origin.x + m_cellW * static_cast<float>(m_screen.cols())) c.col = m_screen.cols() - 1;
     if (!(c == m_selection.head)) {
@@ -633,6 +693,19 @@ void TerminalView::onPointerUp(const PointerEvent& e) {
 }
 
 bool TerminalView::onScroll(const ScrollEvent& e) {
+    if (!reportsMouse(e.modifiers) && !m_screen.altScreen()) {
+        // The history scrolls smoothly, with the same physics as every other scroll view.
+        updateScrollLimits();
+        const double t = now();
+        if (!m_physics.handle(e, t)) return true;
+        syncScroll();
+        m_lastScroll = t;
+        if (m_physics.isAnimating()) requestAnimationFrame();
+        if (auto* h = host(); h && m_physics.deadline() >= 0) h->scheduleFrame(m_physics.deadline());
+        invalidate();
+        return true;
+    }
+    if (e.phase == ScrollPhase::Ended) return true;
     m_scrollAccum += e.delta.y / m_cellH;
     const int lines = static_cast<int>(m_scrollAccum);
     m_scrollAccum -= static_cast<float>(lines);
@@ -649,9 +722,6 @@ bool TerminalView::onScroll(const ScrollEvent& e) {
         send(seq);
         return true;
     }
-    m_scrollOffset = std::clamp(m_scrollOffset - lines, 0, m_screen.scrollbackSize());
-    m_lastScroll = now();
-    invalidate();
     return true;
 }
 
@@ -787,6 +857,7 @@ void TerminalView::draw(Painter& p) {
     }
     const Theme& t = theme();
     const Rect r = frame();
+    stepScroll(now());
     const Color paper = m_screen.reverseVideo() ? m_profile.foreground : m_profile.background;
     p.fillRect(r, paper);
     p.pushClip(r);
@@ -846,11 +917,14 @@ void TerminalView::draw(Painter& p) {
     };
 
     char buf[4];
-    for (int row = 0; row < rows; ++row) {
+    // While scrolling smoothly, a partial row shows above or below the grid.
+    const int firstRow = m_scrollShift > 0 ? -1 : 0;
+    const int lastRow = m_scrollShift < 0 ? rows : rows - 1;
+    for (int row = firstRow; row <= lastRow; ++row) {
         const std::int64_t global = top + row;
         const Line* line = lineGlobal(global);
         if (!line) continue;
-        const float y = m_origin.y + static_cast<float>(row) * m_cellH;
+        const float y = m_origin.y + static_cast<float>(row) * m_cellH + m_scrollShift;
         const bool cursorLine = m_scrollOffset == 0 && row == cursorRow;
         // Backgrounds, merged into runs.
         int runStart = 0;
@@ -906,7 +980,7 @@ void TerminalView::draw(Painter& p) {
     if (cursorOn) {
         const Line* cl = lineGlobal(top + cursorRow);
         const bool wide = cl && cursorCol < static_cast<int>(cl->cells.size()) && (cl->cells[static_cast<size_t>(cursorCol)].attrs() & kWide);
-        const Rect cell{m_origin.x + static_cast<float>(cursorCol) * m_cellW, m_origin.y + static_cast<float>(cursorRow) * m_cellH,
+        const Rect cell{m_origin.x + static_cast<float>(cursorCol) * m_cellW, m_origin.y + static_cast<float>(cursorRow) * m_cellH + m_scrollShift,
                         m_cellW * (wide ? 2.0f : 1.0f), m_cellH};
         const float thick = std::max(px * 2, std::round(m_cellW * 0.14f * m_scale) / m_scale);
         if (!keyFocus) {
@@ -930,7 +1004,7 @@ void TerminalView::draw(Painter& p) {
         const Rect track{r.right() - 9, r.y + 4, 5, r.height - 8};
         const float total = static_cast<float>(history + rows);
         const float thumbH = std::max(24.0f, track.height * static_cast<float>(rows) / total);
-        const float frac = 1.0f - static_cast<float>(m_scrollOffset) / static_cast<float>(history);
+        const float frac = std::clamp(m_physics.offset().y / std::max(1.0f, m_physics.maxOffset().y), 0.0f, 1.0f);
         const Rect thumb{track.x, track.y + (track.height - thumbH) * frac, track.width, thumbH};
         p.fillRoundedRect(thumb, 2.5f, m_profile.foreground.withAlpha(0.35f * alpha));
         if (m_scrollOffset == 0) requestAnimationFrame();

@@ -17,7 +17,8 @@ pkgname=(mayonnaise-git
          mayo-task-manager-git
          mayo-photos-git
          mayo-video-player-git
-         mayo-system-settings-git)
+         mayo-system-settings-git
+         mayo-calculator-git)
 pkgver=0.1.0.r25.e9d2874
 pkgrel=1
 pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3, and apps built with it'
@@ -76,7 +77,7 @@ package_mayonnaise-git() {
 package_mayo-apps-git() {
   pkgdesc='All Mayonnaise applications'
   depends=(mayo-finder-git mayo-terminal-git mayo-task-manager-git mayo-photos-git mayo-video-player-git
-           mayo-system-settings-git)
+           mayo-system-settings-git mayo-calculator-git)
 }
 
 package_mayo-finder-git() {
@@ -132,4 +133,10 @@ package_mayo-system-settings-git() {
               'fontconfig: font list in Appearance'
               'tracker3-miners: search locations')
   _install_component systemsettings
+}
+
+package_mayo-calculator-git() {
+  pkgdesc='Calculator-style basic and scientific calculator (Mayonnaise)'
+  depends=("${_appdeps[@]}")
+  _install_component calculator
 }

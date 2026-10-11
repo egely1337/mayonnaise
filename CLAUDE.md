@@ -29,6 +29,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/applications/finder/finder [folder]                       # Linux only
 ./build/applications/terminal/terminal [directory]                # Linux only
 ./build/applications/system_settings/systemsettings [panel]       # Linux + GIO; changes the real desktop!
+./build/applications/calculator/calculator
 
 # Arch packages (split: library + one package per app, plus mayo-apps-git)
 cd packaging/arch && makepkg -si   # builds whatever is committed
@@ -46,10 +47,13 @@ Useful environment variables:
   (video_player) — drive the apps at startup for screenshots. The finder takes comma-separated steps, including file operations
   (`MAYO_DEMO="list,select:a.txt,duplicate:a.txt,wait:0.3,undo"`, full list in its main.cpp); point it at a
   scratch folder, and it never launches other programs in demo mode.
+  Terminal: `MAYO_DEMO=<command>` types a command, `MAYO_DEMO_SCROLL=<points>` then swipes into the history.
+  Calculator: `MAYO_DEMO=scientific|settings|<keys>` (keys are typed: `MAYO_DEMO='12+3*4='`).
   System settings: `MAYO_DEMO=<panel>[:action]` (actions: `wifi:other`, `displays:keep`, `appearance:fonts`,
   `keyboard:add`, `keyboard:shortcut`, `datetime:zones`); screenshot runs and `SETTINGS_READ_ONLY=1` never write
   GSettings, D-Bus or nmcli/pactl state (Mutter is only asked to *verify* display configs).
-- `MAYO_VERBOSE=2` — also print frames per second (find widgets that never stop requesting frames).
+- `MAYO_VERBOSE=2` — also print frames per second and CPU ms per frame (find widgets that never stop requesting
+  frames, or slow draws).
 - `MAYO_TEST_SCENE=1|text` — renderer / typography test scenes instead of the widget tree.
 - `MAYO_APPEARANCE=dark|light` — force appearance at startup.
 - `MAYO_SCALE=<float>` — override the UI scale factor (HiDPI testing).
@@ -84,10 +88,11 @@ src/theme/            light/dark themes, type scale
 shaders/              GLSL, embedded at build time (cmake/Embed.cmake -> generated .cpp)
 assets/fonts/         InterVariable.ttf (OFL) + license, embedded at build time
 third_party/          vendored glad (generated GL 3.3 core + KHR_debug) and stb single headers
-applications/         finder, terminal, task_manager, photos, video_player, system_settings; each has data/
+applications/         finder, terminal, task_manager, photos, video_player, system_settings, calculator; each has data/
                       (.desktop + icon) and is its own CMake install component
 packaging/arch/       split PKGBUILD
-tests/                doctest unit tests (geometry, color, theme, layout, event dispatch)
+tests/                doctest unit tests (geometry, color, theme, layout, event dispatch, scroll physics,
+                      terminal screen, calculator engine)
 ```
 
 Frame flow: `App::run` blocks in `SDL_WaitEventTimeout` until an event or the next animation /
@@ -188,8 +193,11 @@ Known issues / next steps:
   to Inter glyphs.
 - **Terminal example**: `Screen` (applications/terminal/screen.cpp) is a UI-free xterm emulator tested by
   tests/test_terminal_screen.cpp; `Pty` reads on a worker thread with back-pressure (4 MB) and never blocks
-  the UI on writes; `TerminalView` snaps cells to whole device pixels and draws box drawing, blocks, braille
-  and powerline glyphs as geometry so they join between cells.
+  the UI on writes; the view parses at most ~8 ms of output per loop pass (64 KB slices) and continues after the
+  next frame, so floods don't freeze input (it used to swallow the whole 4 MB, ~100 ms, at once). Runs of plain
+  ASCII skip the byte-by-byte parser, and reflow moves cells instead of copying them. `TerminalView` snaps
+  cells to whole device pixels and draws box drawing, blocks, braille and powerline glyphs as geometry so they
+  join between cells; its history scrolls by points (`ScrollPhysics`), drawing a partial row at the edge.
 - **Applications and packaging**: `applications/CMakeLists.txt` `mayonnaise_app(<binary> ID <desktop id> SOURCES ...)`
   builds an app, passes the desktop id as `MAYO_DESKTOP_ID` to `mayo::App(name, desktopId)` (it becomes the
   Wayland app_id / X11 class, so GNOME matches the window to the .desktop file and icon), and installs binary,
@@ -227,6 +235,19 @@ Known issues / next steps:
 - **Photos example** uses custom `Widget` subclasses (grid, viewer, page container) rather than new library
   widgets: it doubles as the reference for writing custom widgets. A custom detail container opts into
   running under the toolbar with `extendsIntoTitleBar()`.
+- **Scroll physics are shared** (`<mayonnaise/scroll_physics.hpp>`): ScrollView, Sidebar, the terminal's history
+  and Quick Look all use `ScrollPhysics` (wheel glide, 1:1 touchpad tracking, macOS rubber band
+  `c * (1 - x/dim)^2` with c = 0.55, momentum, critically damped bounce). Custom widgets that scroll themselves
+  should use it too instead of clamping offsets, or they feel dead next to everything else. A lone vertical
+  ScrollView bounces even when its content fits; one nested in another vertical scroller passes the gesture on.
+- **Touchpad gestures are latched** by the dispatcher: every event of a gesture goes to the widget that took the
+  first one (until the fingers lift, or a 0.25 s pause without end events), so content moving under the pointer
+  or reaching an edge never hands half a swipe to another scroller.
+- **Calculator example** (applications/calculator): `Engine` is UI-free and tested (tests/test_calculator_engine.cpp):
+  it keeps the whole expression and evaluates with shunting-yard; after an operator the display shows only
+  what that operator settles (2 + 3 × shows 3). Separators come from the C++ locale (`numpunct`). The view is one
+  custom widget (keys are a grid that scales with the window); characters arrive through text input so every
+  keyboard layout and the numpad work, and `Window::setSize` switches between the two keypad sizes.
 - **Extra components beyond the brief**: `Form`/`FormSection`/`FormRow` (System Settings cards), `Picker`,
   `ToolbarGroup`, `ButtonStyle::Glass`, `App::after/post` timers, `MAYO_SCREENSHOT` capture for visual checks.
 
@@ -335,7 +356,12 @@ Known issues / next steps:
   makes the dispatcher send the captured widget an onPointerUp far outside the window. Not available on X11.
 - **Open in Terminal** passes the folder explicitly (`--working-directory` etc.): Ptyxis, Console and GNOME
   Terminal are single-process, so a new window ignores the child's cwd. Mayo Terminal is tried first.
-- **Wheel vs touchpad**: SDL3 gives no device type. Deltas that aren't multiples of 1/120 notch are touchpad
+- **Wheel vs touchpad on Wayland comes from the compositor**: SDL ignores `wl_pointer.axis_source` and
+  `axis_stop`, so `wayland_drag.cpp`'s extra wl_pointer (bound at v5) records them. A finger source makes events
+  precise with `ScrollEvent::reportsEnd`, and the stop becomes a `ScrollPhase::Ended` event (pushed onto SDL's
+  queue so it lands after the gesture's last movement) that starts momentum at once. A frame that only carries
+  the stop doesn't wake `SDL_WaitEventTimeout`, so the loop waits at most 8 ms while a gesture is open.
+- **Wheel vs touchpad elsewhere (X11)**: SDL3 gives no device type. Deltas that aren't multiples of 1/120 notch are touchpad
   (1:1 + momentum); whole notches and high-resolution wheel fractions are a wheel (animated glide). A touchpad
   event can land on a whole value, so events within 250 ms of a touchpad event stay touchpad — per-event
   classification made single events jump 40 pt mid-gesture. Gesture end = no events for 80 ms; the fling

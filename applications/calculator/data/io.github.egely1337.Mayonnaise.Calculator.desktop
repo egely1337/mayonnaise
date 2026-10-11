@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mayo Calculator
+GenericName=Calculator
+Comment=Perform arithmetic and scientific calculations
+Exec=calculator
+Icon=io.github.egely1337.Mayonnaise.Calculator
+Terminal=false
+StartupNotify=true
+Categories=Utility;Calculator;
+Keywords=calculation;arithmetic;scientific;math;hesap;

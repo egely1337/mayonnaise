@@ -210,13 +210,16 @@ void Screen::reflow(int newCols) {
         size_t cursorOffset = 0;
     };
     std::vector<Logical> logical;
+    logical.reserve(m_scrollback.size() + m_lines.size());
     Logical current;
     auto take = [&](Line& l, bool cursorHere, int cursorX) {
         if (cursorHere) {
             current.hasCursor = true;
             current.cursorOffset = current.cells.size() + static_cast<size_t>(cursorX);
         }
-        current.cells.insert(current.cells.end(), l.cells.begin(), l.cells.end());
+        // Most lines are a whole logical line on their own: move their cells instead of copying.
+        if (current.cells.empty()) current.cells = std::move(l.cells);
+        else current.cells.insert(current.cells.end(), l.cells.begin(), l.cells.end());
         if (!l.wrapped) {
             logical.push_back(std::move(current));
             current = Logical{};
@@ -242,21 +245,24 @@ void Screen::reflow(int newCols) {
 
     // 3. Re-split at the new width.
     std::vector<Line> lines;
+    lines.reserve(logical.size() + logical.size() / 4);
     int cursorRow = 0;
     int cursorCol = 0;
     const auto width = static_cast<size_t>(newCols);
     for (auto& lg : logical) {
+        const size_t size = lg.cells.size();
         size_t pos = 0;
         bool first = true;
-        while (first || pos < lg.cells.size()) {
+        while (first || pos < size) {
             first = false;
-            size_t end = std::min(lg.cells.size(), pos + width);
+            size_t end = std::min(size, pos + width);
             // Don't split a wide character from its spacer.
-            if (end < lg.cells.size() && end > pos + 1 && (lg.cells[end - 1].attrs() & kWide)) --end;
+            if (end < size && end > pos + 1 && (lg.cells[end - 1].attrs() & kWide)) --end;
             Line out;
-            out.cells.assign(lg.cells.begin() + static_cast<std::ptrdiff_t>(pos), lg.cells.begin() + static_cast<std::ptrdiff_t>(end));
-            out.cells.resize(width, Cell{});
-            out.wrapped = end < lg.cells.size();
+            // Rows are padded to the width only if they end up on the screen (step 4); history stays trimmed.
+            if (pos == 0 && end == size) out.cells = std::move(lg.cells);
+            else out.cells.assign(lg.cells.begin() + static_cast<std::ptrdiff_t>(pos), lg.cells.begin() + static_cast<std::ptrdiff_t>(end));
+            out.wrapped = end < size;
             if (lg.hasCursor && lg.cursorOffset >= pos && (lg.cursorOffset < end || !out.wrapped)) {
                 cursorRow = static_cast<int>(lines.size());
                 cursorCol = static_cast<int>(std::min(lg.cursorOffset - pos, width - 1));
@@ -279,7 +285,10 @@ void Screen::reflow(int newCols) {
     }
     while (static_cast<int>(m_scrollback.size()) > m_scrollbackLimit) m_scrollback.pop_front();
     m_lines.clear();
-    for (int i = screenTop; i < total && static_cast<int>(m_lines.size()) < m_rows; ++i) m_lines.push_back(std::move(lines[static_cast<size_t>(i)]));
+    for (int i = screenTop; i < total && static_cast<int>(m_lines.size()) < m_rows; ++i) {
+        m_lines.push_back(std::move(lines[static_cast<size_t>(i)]));
+        m_lines.back().cells.resize(width, Cell{});
+    }
     while (static_cast<int>(m_lines.size()) < m_rows) m_lines.push_back(Line{std::vector<Cell>(width), false});
     m_cursor.y = std::clamp(cursorRow - screenTop, 0, m_rows - 1);
     m_cursor.x = cursorCol;
@@ -289,8 +298,59 @@ void Screen::reflow(int newCols) {
 // --- parser ---------------------------------------------------------------------------------------------
 
 void Screen::feed(std::string_view bytes) {
-    for (unsigned char c : bytes) byte(c);
+    const char* p = bytes.data();
+    const char* const end = p + bytes.size();
+    while (p < end) {
+        // Most output is runs of plain ASCII text; write those a row at a time instead of byte by byte.
+        if (m_state == State::Ground && m_utf8Left == 0 && !m_insert && m_cursor.charset[m_cursor.gl] == 0) {
+            const char* run = p;
+            while (run < end && static_cast<unsigned char>(*run) >= 0x20 && static_cast<unsigned char>(*run) < 0x7F) ++run;
+            if (run != p) {
+                printAscii(p, run);
+                p = run;
+                continue;
+            }
+        }
+        byte(static_cast<unsigned char>(*p++));
+    }
     touch();
+}
+
+void Screen::printAscii(const char* p, const char* end) {
+    const auto attrs = static_cast<std::uint32_t>(m_cursor.pen.attrs) << 21;
+    while (p < end) {
+        auto& lines = active();
+        if (m_cursor.pendingWrap && m_autowrap) {
+            lines[static_cast<size_t>(m_cursor.y)].wrapped = true;
+            carriageReturn();
+            lineFeed();
+        }
+        auto& cells = lines[static_cast<size_t>(m_cursor.y)].cells;
+        const int x = m_cursor.x;
+        const int n = static_cast<int>(std::min<std::ptrdiff_t>(end - p, m_cols - x));
+        // Overwriting half of a wide character clears the other half (see print()).
+        if ((cells[static_cast<size_t>(x)].attrs() & kWideSpacer) && x > 0) cells[static_cast<size_t>(x - 1)] = blankCell();
+        const auto last = static_cast<size_t>(x + n - 1);
+        if ((cells[last].attrs() & kWide) && last + 1 < cells.size()) cells[last + 1] = blankCell();
+        for (int i = 0; i < n; ++i) {
+            Cell& cell = cells[static_cast<size_t>(x + i)];
+            cell.ch = static_cast<unsigned char>(p[i]) | attrs;
+            cell.fg = m_cursor.pen.fg;
+            cell.bg = m_cursor.pen.bg;
+        }
+        p += n;
+        m_cursor.x += n;
+        if (m_cursor.x >= m_cols) {
+            m_cursor.x = m_cols - 1;
+            m_cursor.pendingWrap = m_autowrap;
+            if (!m_autowrap && p < end) {
+                // Without autowrap the rest of the run keeps overwriting the last column.
+                cells[last].ch = static_cast<unsigned char>(end[-1]) | attrs;
+                p = end;
+            }
+        }
+        m_lastPrinted = static_cast<unsigned char>(p[-1]);
+    }
 }
 
 int Screen::param(size_t i, int fallback) const {
@@ -550,18 +610,24 @@ void Screen::scrollUp(int top, int bottom, int n) {
     for (int i = 0; i < n; ++i) {
         Line& gone = lines[static_cast<size_t>(top + i)];
         // Lines leaving the top of the full main screen go to the scrollback.
+        std::vector<Cell> reuse;
         if (!m_alt && top == 0 && m_scrollbackLimit > 0) {
             Line keep = std::move(gone);
             while (!keep.cells.empty() && keep.cells.back() == Cell{} && !keep.wrapped) keep.cells.pop_back();
-            keep.cells.shrink_to_fit();
+            if (keep.cells.capacity() > keep.cells.size() + 8) keep.cells.shrink_to_fit();
             m_scrollback.push_back(std::move(keep));
             if (static_cast<int>(m_scrollback.size()) > m_scrollbackLimit) {
+                // Recycle the dropped line's buffer for the new blank one.
+                reuse = std::move(m_scrollback.front().cells);
                 m_scrollback.pop_front();
                 ++m_dropped;
             }
+        } else {
+            reuse = std::move(gone.cells);
         }
-        gone = blankLine();
-        for (auto& c : gone.cells) c = blankCell();
+        reuse.assign(static_cast<size_t>(m_cols), blankCell());
+        gone.cells = std::move(reuse);
+        gone.wrapped = false;
     }
     std::rotate(lines.begin() + top, lines.begin() + top + n, lines.begin() + bottom + 1);
 }

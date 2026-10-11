@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -130,7 +131,7 @@ void Pty::run() {
         {
             // Back-pressure: a flood of output waits for the UI instead of growing memory without bound.
             std::unique_lock lock(m_mutex);
-            m_drained.wait(lock, [&] { return m_stop || m_output.size() < kMaxBuffered; });
+            m_drained.wait(lock, [&] { return m_stop || m_output.size() - m_taken < kMaxBuffered; });
             if (m_stop) return;
         }
         bool wantWrite = false;
@@ -181,12 +182,23 @@ void Pty::run() {
     }
 }
 
-std::string Pty::takeOutput() {
+std::string Pty::takeOutput(size_t max, bool& more) {
     std::string out;
     {
         std::lock_guard lock(m_mutex);
-        out.swap(m_output);
-        m_posted = false;
+        const size_t n = std::min(max, m_output.size() - m_taken);
+        out.assign(m_output, m_taken, n);
+        m_taken += n;
+        more = m_taken < m_output.size();
+        if (!more) {
+            m_output.clear();
+            m_taken = 0;
+            m_posted = false;
+        } else if (m_taken > m_output.size() / 2) {
+            // Compact now and then; a flood never lets the buffer drain completely.
+            m_output.erase(0, m_taken);
+            m_taken = 0;
+        }
     }
     m_drained.notify_all();
     return out;

@@ -35,8 +35,9 @@ public:
     void write(std::string_view data);
     void resize(int cols, int rows, int pixelWidth, int pixelHeight);
 
-    /// Output read since the last call (UI thread).
-    std::string takeOutput();
+    /// Up to `max` bytes of the output read so far (UI thread). `more` tells whether some is left; then
+    /// onOutput won't fire again until the caller has taken the rest.
+    std::string takeOutput(size_t max, bool& more);
     /// UI thread: new output is waiting (once per batch).
     std::function<void()> onOutput;
     /// UI thread: the shell exited.
@@ -63,7 +64,8 @@ private:
     std::thread m_thread;
     std::mutex m_mutex;
     std::condition_variable m_drained;
-    std::string m_output;   // read, not yet taken by the UI
+    std::string m_output;   // read; the UI has taken everything before m_taken
+    size_t m_taken = 0;
     std::string m_pending;  // to write
     bool m_posted = false;
     bool m_stop = false;

@@ -32,6 +32,7 @@ add_library(mayonnaise
   widgets/menu.cpp
   widgets/popup.cpp
   widgets/progress_bar.cpp
+  widgets/scroll_physics.cpp
   widgets/scroll_view.cpp
   widgets/segmented_control.cpp
   widgets/sidebar.cpp

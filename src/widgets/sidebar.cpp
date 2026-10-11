@@ -13,6 +13,7 @@ constexpr float kHeaderGap = 10;
 }  // namespace
 
 SidebarView::SidebarView(std::vector<SidebarItem> items) : m_items(std::move(items)) {
+    m_physics.setBouncesWhenFitting(false, true);
     for (const auto& it : m_items) {
         if (!it.isHeader) {
             m_selection = it.id;
@@ -122,11 +123,20 @@ void SidebarView::arrangeContent(const Rect& content) {
 }
 
 void SidebarView::clampScroll() {
-    float visible = frame().bottom() - listTop();
-    m_scroll = std::clamp(m_scroll, 0.0f, std::max(0.0f, contentHeight() - visible));
+    const float visible = frame().bottom() - listTop();
+    m_physics.setLimits({0, std::max(0.0f, contentHeight() - visible)}, {frame().width, visible});
+    m_scroll = m_physics.offset().y;
+}
+
+void SidebarView::stepScroll() {
+    if (!m_physics.isAnimating()) return;
+    if (m_physics.step(now())) requestAnimationFrame();
+    else if (auto* h = host(); h && m_physics.deadline() >= 0) h->scheduleFrame(m_physics.deadline());
+    m_scroll = m_physics.offset().y;
 }
 
 void SidebarView::draw(Painter& p) {
+    stepScroll();
     const Theme& t = theme();
     const auto& c = t.colors;
     // Like macOS source lists: accent selection while focused (or when asked for), gray otherwise.
@@ -218,10 +228,11 @@ void SidebarView::onPointerLeave() {
 }
 
 bool SidebarView::onScroll(const ScrollEvent& e) {
-    float before = m_scroll;
-    m_scroll += e.delta.y;
     clampScroll();
-    if (m_scroll == before) return false;
+    if (!m_physics.handle(e, now())) return false;
+    m_scroll = m_physics.offset().y;
+    if (m_physics.isAnimating()) requestAnimationFrame();
+    if (auto* h = host(); h && m_physics.deadline() >= 0) h->scheduleFrame(m_physics.deadline());
     invalidate();
     return true;
 }
@@ -238,6 +249,7 @@ void SidebarView::moveSelection(int delta) {
             Rect r = rowRect(i);
             if (r.y < listTop()) m_scroll -= listTop() - r.y;
             if (r.bottom() > frame().bottom()) m_scroll += r.bottom() - frame().bottom();
+            m_physics.setOffset({0, m_scroll});
             clampScroll();
             return;
         }

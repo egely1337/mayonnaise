@@ -139,6 +139,7 @@ private:
     void byte(unsigned char c);
     void control(unsigned char c);
     void print(char32_t cp);
+    void printAscii(const char* p, const char* end);  // printable ASCII run, ground state, no insert mode
     void escape(unsigned char final);
     void csi(unsigned char final);
     void osc();

@@ -62,6 +62,10 @@ private:
     std::vector<std::weak_ptr<Widget>> m_hoverPath;  // root ... deepest
     std::weak_ptr<Widget> m_captured;
     std::weak_ptr<Widget> m_focused;
+    // A touchpad gesture stays with the widget that took its first event (macOS latching): content moving
+    // under the pointer, or reaching an edge, must not hand the rest of the swipe to another scroller.
+    std::weak_ptr<Widget> m_scrollLatch;
+    double m_scrollLatchTime = -1;
     bool m_focusVisible = false;
     Point m_lastPointer{-1e6f, -1e6f};
     bool m_pointerInside = false;

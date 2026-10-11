@@ -9,17 +9,10 @@
 namespace mayo {
 
 namespace {
-constexpr double kGestureEnd = 0.08;   // seconds without touchpad events = fingers lifted
-constexpr double kFlingWindow = 0.08;  // momentum velocity is measured over the gesture's last 80 ms
-constexpr float kMinFling = 120.0f;    // slower than this (points/second) and the content just stops
-constexpr float kMaxFling = 9000.0f;
-constexpr float kDecay = 2.2f;         // momentum velocity decay per second (macOS "normal" rate)
-constexpr float kSpringK = 170.0f;     // rubber-band spring stiffness
-constexpr double kBarLinger = 0.9;     // scrollbars stay visible after activity
+constexpr double kBarLinger = 0.9;  // scrollbars stay visible after activity
 constexpr double kBarFade = 0.25;
 
 float component(Vec2 v, int i) { return i == 0 ? v.x : v.y; }
-void setComponent(Vec2& v, int i, float value) { (i == 0 ? v.x : v.y) = value; }
 }  // namespace
 
 ScrollViewView::ScrollViewView(std::shared_ptr<Widget> content) { setContent(std::move(content)); }
@@ -32,6 +25,7 @@ void ScrollViewView::setContent(std::shared_ptr<Widget> content) {
 
 void ScrollViewView::setAxes(ScrollAxes axes) {
     m_axes = axes;
+    m_physics.setAxes(scrolls(Axis::Horizontal), scrolls(Axis::Vertical));
     invalidateLayout();
 }
 
@@ -46,10 +40,24 @@ bool ScrollViewView::scrolls(Axis axis) const {
     return axis == Axis::Vertical ? m_axes == ScrollAxes::Vertical : m_axes == ScrollAxes::Horizontal;
 }
 
+bool ScrollViewView::hasScrollingAncestor(Axis axis) const {
+    for (const Widget* w = parent(); w; w = w->parent()) {
+        if (const auto* sv = dynamic_cast<const ScrollViewView*>(w); sv && sv->scrolls(axis)) return true;
+    }
+    return false;
+}
+
 Vec2 ScrollViewView::maxOffset() const {
     Rect v = contentRect();
     return {scrolls(Axis::Horizontal) ? std::max(0.0f, m_contentSize.width - v.width) : 0.0f,
             scrolls(Axis::Vertical) ? std::max(0.0f, m_contentSize.height + m_insetTop - v.height) : 0.0f};
+}
+
+void ScrollViewView::updateLimits() {
+    Rect v = contentRect();
+    m_physics.setAxes(scrolls(Axis::Horizontal), scrolls(Axis::Vertical));
+    m_physics.setBouncesWhenFitting(false, scrolls(Axis::Vertical) && !hasScrollingAncestor(Axis::Vertical));
+    m_physics.setLimits(maxOffset(), {v.width, v.height - m_insetTop});
 }
 
 Size ScrollViewView::measureContent(Size available) {
@@ -68,17 +76,15 @@ void ScrollViewView::arrangeContent(const Rect& viewport) {
     Size s = m_content->measure(proposal);
     // Content is at least as large as the viewport so expanding content (spacers) still fills it.
     m_contentSize = {std::max(s.width, viewport.width), std::max(s.height, viewport.height - m_insetTop)};
-    if (m_phase == Phase::Idle) {
-        Vec2 mx = maxOffset();
-        m_offset = {std::clamp(m_offset.x, 0.0f, mx.x), std::clamp(m_offset.y, 0.0f, mx.y)};
-    }
+    updateLimits();
     place();
 }
 
 void ScrollViewView::place() {
     if (!m_content) return;
     Rect v = contentRect();
-    m_content->arrange({v.x - m_offset.x, v.y + m_insetTop - m_offset.y, m_contentSize.width, m_contentSize.height});
+    Vec2 o = m_physics.offset();
+    m_content->arrange({v.x - o.x, v.y + m_insetTop - o.y, m_contentSize.width, m_contentSize.height});
 }
 
 void ScrollViewView::touch() {
@@ -88,130 +94,34 @@ void ScrollViewView::touch() {
 }
 
 void ScrollViewView::scrollTo(Vec2 offset, bool animated) {
-    Vec2 mx = maxOffset();
-    Vec2 target{std::clamp(offset.x, 0.0f, mx.x), std::clamp(offset.y, 0.0f, mx.y)};
-    if (animated) {
-        m_glide.set(m_offset);
-        m_glide.animateTo(target, now(), Transition{0.3f, Curve::EaseInOut});
-        m_phase = Phase::Gliding;
-    } else {
-        m_offset = target;
-        m_phase = Phase::Idle;
-        place();
-    }
+    updateLimits();
+    m_physics.scrollTo(offset, animated, now());
+    if (animated) requestAnimationFrame();
+    place();
     touch();
 }
 
 bool ScrollViewView::onScroll(const ScrollEvent& e) {
-    Vec2 delta = e.delta;
-    if (!scrolls(Axis::Horizontal)) delta.x = 0;
-    if (!scrolls(Axis::Vertical)) delta.y = 0;
-    Vec2 mx = maxOffset();
-    // Let the parent scroll if we can't move in the requested direction (scroll chaining).
-    auto canMove = [&](int i) {
-        float d = component(delta, i);
-        float o = component(m_offset, i);
-        float m = component(mx, i);
-        return (d < 0 && o > 0) || (d > 0 && o < m) || (e.precise && m > 0 && d != 0);
-    };
-    if (!canMove(0) && !canMove(1)) return false;
-
+    updateLimits();
     const double t = now();
-    if (!e.precise) {
-        Vec2 base = m_phase == Phase::Gliding ? m_glide.target() : m_offset;
-        Vec2 target{std::clamp(base.x + delta.x, 0.0f, mx.x), std::clamp(base.y + delta.y, 0.0f, mx.y)};
-        m_glide.set(m_offset);
-        m_glide.animateTo(target, t, Transition{0.2f, Curve::EaseOut});
-        m_phase = Phase::Gliding;
-        m_velocity = {};
-    } else {
-        if (m_phase != Phase::Tracking) {
-            m_velocity = {};
-            m_samples.clear();
-        }
-        for (int i = 0; i < 2; ++i) {
-            float d = component(delta, i);
-            float o = component(m_offset, i);
-            float m = component(mx, i);
-            float over = o < 0 ? -o : (o > m ? o - m : 0.0f);
-            // Rubber band: movement past the edge meets increasing resistance.
-            if ((o <= 0 && d < 0) || (o >= m && d > 0)) d *= 0.45f / (1.0f + over / 40.0f);
-            setComponent(m_offset, i, o + d);
-            setComponent(delta, i, d);
-        }
-        m_samples.emplace_back(t, delta);
-        while (!m_samples.empty() && t - m_samples.front().first > kFlingWindow * 2) m_samples.pop_front();
-        m_phase = Phase::Tracking;
-        m_lastEvent = t;
-        if (auto* h = host()) h->scheduleFrame(t + kGestureEnd + 0.01);
-        place();
-    }
-    m_lastStep = t;
+    if (!m_physics.handle(e, t)) return false;
+    if (auto* h = host(); h && m_physics.deadline() >= 0) h->scheduleFrame(m_physics.deadline());
+    if (m_physics.isAnimating()) requestAnimationFrame();
+    place();
     touch();
     return true;
 }
 
 void ScrollViewView::step(double t) {
-    if (m_phase == Phase::Idle) return;
-    float dt = std::clamp(static_cast<float>(t - m_lastStep), 0.0f, 0.05f);
-    m_lastStep = t;
-    Vec2 mx = maxOffset();
-
-    if (m_phase == Phase::Gliding) {
-        m_offset = m_glide.value(t);
-        if (!m_glide.isAnimating(t)) m_phase = Phase::Idle;
-        place();
-        requestAnimationFrame();
-        return;
-    }
-    if (m_phase == Phase::Tracking) {
-        if (t - m_lastEvent < kGestureEnd) return;
-        m_phase = Phase::Momentum;
-        // Fling velocity from the movement just before the fingers stopped sending events. A finger that
-        // slowed down and rested (rather than flicked and lifted) has moved little in that window, so the
-        // content stops instead of drifting away on a stale velocity.
-        Vec2 moved;
-        double first = m_lastEvent;
-        for (const auto& [ts, d] : m_samples) {
-            if (m_lastEvent - ts > kFlingWindow) continue;
-            moved = moved + d;
-            first = std::min(first, ts);
-        }
-        m_samples.clear();
-        const auto span = static_cast<float>(std::max(0.02, m_lastEvent - first + 0.008));
-        m_velocity = moved * (1.0f / span);
-        if (m_velocity.length() < kMinFling) m_velocity = {};
-        if (const float len = m_velocity.length(); len > kMaxFling) m_velocity = m_velocity * (kMaxFling / len);
-    }
-
-    bool active = false;
-    for (int i = 0; i < 2; ++i) {
-        float o = component(m_offset, i);
-        float v = component(m_velocity, i);
-        float m = component(mx, i);
-        float bound = o < 0 ? 0.0f : (o > m ? m : o);
-        float x = o - bound;  // overscroll distance
-        if (x != 0) {
-            // Critically damped spring back to the edge.
-            float a = -kSpringK * x - 2.0f * std::sqrt(kSpringK) * v;
-            v += a * dt;
-        } else {
-            v *= std::exp(-kDecay * dt);
-        }
-        o += v * dt;
-        if (std::abs(v) < 4 && std::abs(o - std::clamp(o, 0.0f, m)) < 0.5f) {
-            o = std::clamp(o, 0.0f, m);
-            v = 0;
-        } else {
-            active = true;
-        }
-        setComponent(m_offset, i, o);
-        setComponent(m_velocity, i, v);
-    }
-    if (!active) m_phase = Phase::Idle;
+    if (!m_physics.isAnimating()) return;
+    const bool moving = m_physics.step(t);
     place();
-    touch();
-    requestAnimationFrame();
+    if (moving) {
+        touch();
+        requestAnimationFrame();
+    } else if (auto* h = host(); h && m_physics.deadline() >= 0) {
+        h->scheduleFrame(m_physics.deadline());
+    }
 }
 
 Rect ScrollViewView::trackRect(Axis axis) const {
@@ -229,8 +139,8 @@ Rect ScrollViewView::thumbRect(Axis axis) const {
     float contentLen = i == 0 ? m_contentSize.width : m_contentSize.height;
     float trackLen = i == 0 ? track.width : track.height;
     float m = component(maxOffset(), i);
-    float o = component(m_offset, i);
-    float over = o < 0 ? -o : (o > m ? o - m : 0.0f);
+    float o = component(m_physics.offset(), i);
+    float over = std::abs(component(m_physics.overscroll(), i));
     float len = std::max(20.0f, trackLen * viewLen / std::max(contentLen, 1.0f) - over * 0.5f);
     len = std::min(len, trackLen);
     float frac = m > 0 ? std::clamp(o / m, 0.0f, 1.0f) : 0.0f;
@@ -290,7 +200,7 @@ bool ScrollViewView::onPointerDown(const PointerEvent& e) {
         float len = i == 0 ? thumb.width : thumb.height;
         m_dragAxis = i;
         m_dragGrab = (pos >= start && pos <= start + len) ? pos - start : len * 0.5f;
-        m_phase = Phase::Idle;
+        m_physics.setOffset(m_physics.offset());  // grabbing the bar stops momentum
         onPointerMove(e);
         return true;
     }
@@ -307,7 +217,9 @@ void ScrollViewView::onPointerMove(const PointerEvent& e) {
         float trackLen = i == 0 ? track.width : track.height;
         float len = (i == 0 ? thumb.width : thumb.height) + 4;
         float frac = (component(e.position, i) - m_dragGrab - trackStart) / std::max(1.0f, trackLen - len);
-        setComponent(m_offset, i, std::clamp(frac, 0.0f, 1.0f) * component(maxOffset(), i));
+        Vec2 o = m_physics.offset();
+        (i == 0 ? o.x : o.y) = std::clamp(frac, 0.0f, 1.0f) * component(maxOffset(), i);
+        m_physics.setOffset(o);
         place();
         touch();
         return;

@@ -87,6 +87,12 @@ private:
 
     void output();
     void send(std::string_view bytes);
+    // Scrollback position. m_physics works in points from the oldest history line; m_scrollOffset and
+    // m_scrollShift are derived from it for drawing and hit testing.
+    void updateScrollLimits();
+    void syncScroll();
+    void scrollToLines(int linesBack, bool animated);
+    void stepScroll(double t);
     void userInput();  // scrolls back to the live screen, restarts the cursor blink
     void updateMetrics(float scale);
     void updateGrid();
@@ -122,8 +128,10 @@ private:
     bool m_started = false;
     bool m_exited = false;
 
-    int m_scrollOffset = 0;  // lines scrolled back into history (0 = live)
-    float m_scrollAccum = 0;
+    int m_scrollOffset = 0;    // whole lines scrolled back into history (0 = live)
+    float m_scrollShift = 0;   // sub-line remainder (and rubber-band stretch), added to row positions
+    mayo::ScrollPhysics m_physics;
+    float m_scrollAccum = 0;   // mouse-reporting / alt-screen scrolling, in lines
     double m_lastScroll = -10;
 
     Selection m_selection;

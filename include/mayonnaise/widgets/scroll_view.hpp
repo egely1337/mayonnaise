@@ -1,7 +1,6 @@
 #pragma once
 
-#include <deque>
-
+#include "../scroll_physics.hpp"
 #include "../widget.hpp"
 
 namespace mayo {
@@ -16,7 +15,7 @@ public:
 
     void setAxes(ScrollAxes axes);
     void setContent(std::shared_ptr<Widget> content);
-    [[nodiscard]] Vec2 offset() const { return m_offset; }
+    [[nodiscard]] Vec2 offset() const { return m_physics.offset(); }
     void scrollTo(Vec2 offset, bool animated = true);
     /// Extra space above the content (e.g. a toolbar the content slides under).
     void setContentInsetTop(float inset);
@@ -33,11 +32,14 @@ public:
     void onHoverChanged(bool hovered) override;
     /// Advances scroll physics to `now` (called every frame from draw; public for tests).
     void step(double now);
-    [[nodiscard]] bool isAnimating() const { return m_phase != Phase::Idle; }
+    [[nodiscard]] bool isAnimating() const { return m_physics.isAnimating(); }
 
 private:
-    enum class Phase : std::uint8_t { Idle, Tracking, Momentum, Gliding };
     [[nodiscard]] Vec2 maxOffset() const;
+    void updateLimits();
+    /// A lone vertical scroll view bounces even when its content fits; a nested one leaves the gesture
+    /// to its scrolling ancestor.
+    [[nodiscard]] bool hasScrollingAncestor(Axis axis) const;
     [[nodiscard]] bool scrolls(Axis axis) const;
     void place();
     void touch();  // marks activity so scrollbars show
@@ -48,13 +50,7 @@ private:
     ScrollAxes m_axes = ScrollAxes::Vertical;
     Size m_contentSize;
     float m_insetTop = 0;
-    Vec2 m_offset;
-    Vec2 m_velocity;  // points/second
-    std::deque<std::pair<double, Vec2>> m_samples;  // recent touchpad deltas, for the fling velocity
-    Phase m_phase = Phase::Idle;
-    double m_lastEvent = 0;
-    double m_lastStep = 0;
-    Animated<Vec2> m_glide;
+    ScrollPhysics m_physics;
     double m_activity = -10;
     bool m_hoveringBar = false;
     int m_dragAxis = -1;  // 0 = vertical bar, 1 = horizontal bar

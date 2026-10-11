@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../icon.hpp"
+#include "../scroll_physics.hpp"
 #include "../widget.hpp"
 
 namespace mayo {
@@ -71,7 +72,8 @@ private:
     [[nodiscard]] int rowAt(Point p) const;
     [[nodiscard]] Rect rowRect(int index) const;
     void moveSelection(int delta);
-    void clampScroll();
+    void clampScroll();  // updates the scroll range; m_scroll follows m_physics
+    void stepScroll();
 
     std::vector<SidebarItem> m_items;
     std::string m_selection;
@@ -81,6 +83,7 @@ private:
     int m_hovered = -1;
     int m_pressed = -1;
     float m_scroll = 0;
+    ScrollPhysics m_physics;
     Animated<Rect> m_highlight;  // selection pill glides between rows
 };
 

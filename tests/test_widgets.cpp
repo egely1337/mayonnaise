@@ -84,10 +84,79 @@ TEST_CASE("ScrollView: rubber-band overscroll springs back") {
         f.scroll->onScroll(f.precise(-30));
     }
     CHECK(f.scroll->offset().y < 0);
-    CHECK(f.scroll->offset().y > -60);  // resistance applied
+    CHECK(f.scroll->offset().y > -80);  // resistance applied: 150 pt of finger travel, about half of it shown
     f.run(2.0);
     CHECK(f.scroll->offset().y == doctest::Approx(0).epsilon(0.01));
     CHECK_FALSE(f.scroll->isAnimating());
+}
+
+TEST_CASE("ScrollView: bounces at the bottom edge too") {
+    ScrollFixture f;
+    f.scroll->scrollTo({0, 1600}, false);
+    CHECK(f.scroll->offset().y == doctest::Approx(1600));
+    for (int i = 0; i < 5; ++i) {
+        f.host.clock += 0.016;
+        CHECK(f.scroll->onScroll(f.precise(30)));
+    }
+    CHECK(f.scroll->offset().y > 1600);
+    CHECK(f.scroll->offset().y < 1680);
+    f.run(2.0);
+    CHECK(f.scroll->offset().y == doctest::Approx(1600).epsilon(0.001));
+}
+
+TEST_CASE("ScrollView: a fling into the edge bounces and settles") {
+    ScrollFixture f;
+    f.scroll->scrollTo({0, 1500}, false);
+    for (int i = 0; i < 6; ++i) {
+        f.host.clock += 0.016;
+        f.scroll->onScroll(f.precise(40));
+    }
+    float maxSeen = 0;
+    for (double t = 0; t < 3.0; t += 1.0 / 60.0) {
+        f.host.clock += 1.0 / 60.0;
+        f.scroll->step(f.host.clock);
+        maxSeen = std::max(maxSeen, f.scroll->offset().y);
+    }
+    CHECK(maxSeen > 1610);  // went past the end ...
+    CHECK(maxSeen < 1720);  // ... but not absurdly far
+    CHECK(f.scroll->offset().y == doctest::Approx(1600).epsilon(0.001));
+    CHECK_FALSE(f.scroll->isAnimating());
+}
+
+TEST_CASE("ScrollView: an explicit end starts momentum at once; resting fingers hold") {
+    ScrollFixture f;
+    auto ev = [](float dy, ScrollPhase phase = ScrollPhase::Changed) {
+        return ScrollEvent{{10, 10}, {0, dy}, true, Modifiers::None, phase, true};
+    };
+    for (int i = 0; i < 5; ++i) {
+        f.host.clock += 0.016;
+        f.scroll->onScroll(ev(-30));  // stretch past the top
+    }
+    const float stretched = f.scroll->offset().y;
+    CHECK(stretched < 0);
+    f.run(0.3);  // fingers resting: longer than the guessing timeout, but the platform reports the end
+    CHECK(f.scroll->offset().y == doctest::Approx(stretched));
+    f.scroll->onScroll(ev(0, ScrollPhase::Ended));
+    CHECK(f.scroll->isAnimating());
+    f.run(1.5);
+    CHECK(f.scroll->offset().y == doctest::Approx(0).epsilon(0.01));
+}
+
+TEST_CASE("ScrollView: content that fits still bounces, unless nested in another scroller") {
+    test::TestHost host;
+    auto small = std::make_shared<test::Box>(Size{300, 100});
+    auto scroll = std::make_shared<ScrollViewView>(small);
+    host.attach(scroll, {300, 400});
+    CHECK(scroll->onScroll(ScrollEvent{{10, 10}, {0, 20}, true, Modifiers::None}));
+    CHECK(scroll->offset().y > 0);
+    // Wheel notches have nothing to do.
+    CHECK_FALSE(scroll->onScroll(ScrollEvent{{10, 10}, {0, 40}, false, Modifiers::None}));
+
+    test::TestHost host2;
+    auto inner = std::make_shared<ScrollViewView>(std::make_shared<test::Box>(Size{300, 100}));
+    auto outer = std::make_shared<ScrollViewView>(inner);
+    host2.attach(outer, {300, 400});
+    CHECK_FALSE(inner->onScroll(ScrollEvent{{10, 10}, {0, 20}, true, Modifiers::None}));
 }
 
 TEST_CASE("TextField editing") {

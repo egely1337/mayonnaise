@@ -23,6 +23,19 @@ std::array<SDL_Cursor*, 6> g_cursors{};
 CursorShape g_currentCursor = CursorShape::Arrow;
 Uint32 g_wakeEvent = 0;
 Uint32 g_dragEndEvent = 0;
+Uint32 g_scrollEndEvent = 0;
+
+/// Turns a finger lift seen on our Wayland queue into an SDL event, queued behind the wheel events SDL
+/// already produced from the same read, so the widget sees the gesture's last movement first.
+void forwardScrollStop() {
+    if (!wayland::takeScrollStop()) return;
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = g_scrollEndEvent;
+    SDL_Window* focus = SDL_GetMouseFocus();
+    e.user.windowID = focus ? SDL_GetWindowID(focus) : 0;
+    SDL_PushEvent(&e);
+}
 
 void* waylandDisplay() {
     const char* driver = SDL_GetCurrentVideoDriver();
@@ -284,6 +297,12 @@ void PlatformWindow::toggleMaximize() {
 }
 void PlatformWindow::setFullscreen(bool fullscreen) { SDL_SetWindowFullscreen(m_impl->window, fullscreen); }
 
+void PlatformWindow::setSize(int w, int h) {
+    const float k = pointsPerWindowUnit();
+    SDL_SetWindowSize(m_impl->window, static_cast<int>(std::lround(static_cast<float>(w) / k)),
+                      static_cast<int>(std::lround(static_cast<float>(h) / k)));
+}
+
 void PlatformWindow::setMinimumSize(int w, int h) {
     float k = pointsPerWindowUnit();
     SDL_SetWindowMinimumSize(m_impl->window, static_cast<int>(static_cast<float>(w) / k),
@@ -353,6 +372,7 @@ bool Platform::init(const std::string& appId) {
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     g_wakeEvent = SDL_RegisterEvents(1);
     g_dragEndEvent = SDL_RegisterEvents(1);
+    g_scrollEndEvent = SDL_RegisterEvents(1);
     if (void* display = waylandDisplay()) wayland::prepare(display);
     return true;
 }
@@ -423,15 +443,22 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
             // fractions of a notch in 1/120 steps. A single touchpad event can still land on a whole value
             // (1.0, or 0 on the idle axis), so once a gesture looks like a touchpad, events that follow it
             // closely stay "precise" — otherwise one event would turn into a 40 pt wheel glide mid-gesture.
-            static Uint64 lastPrecise = 0;
-            auto notchLike = [](float v) {
-                const float scaled = v * 120.0f;
-                return std::abs(scaled - std::round(scaled)) < 1e-3f;
-            };
-            const bool fractional = !notchLike(dx) || !notchLike(dy);
-            if (fractional) lastPrecise = e.wheel.timestamp;
-            constexpr Uint64 kStickyNs = 250'000'000;
-            out.precise = fractional || (lastPrecise != 0 && e.wheel.timestamp - lastPrecise < kStickyNs);
+            // On Wayland the compositor says which device it was (and when the fingers lift), which beats
+            // guessing: a slow touchpad swipe produces whole values often enough to be taken for a wheel.
+            if (const int source = wayland::scrollSource(); source >= 0) {
+                out.precise = source == 1 || source == 2;  // finger, continuous
+                out.scrollEnds = out.precise;
+            } else {
+                static Uint64 lastPrecise = 0;
+                auto notchLike = [](float v) {
+                    const float scaled = v * 120.0f;
+                    return std::abs(scaled - std::round(scaled)) < 1e-3f;
+                };
+                const bool fractional = !notchLike(dx) || !notchLike(dy);
+                if (fractional) lastPrecise = e.wheel.timestamp;
+                constexpr Uint64 kStickyNs = 250'000'000;
+                out.precise = fractional || (lastPrecise != 0 && e.wheel.timestamp - lastPrecise < kStickyNs);
+            }
             out.delta = Vec2{dx, -dy};
             out.modifiers = translateMods(SDL_GetModState());
             return true;
@@ -469,6 +496,11 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
                 out.type = EventType::Wake;
                 return true;
             }
+            if (e.type == g_scrollEndEvent) {
+                out.type = EventType::ScrollEnd;
+                out.window = e.user.windowID;
+                return true;
+            }
             if (e.type == g_dragEndEvent) {
                 out.type = EventType::DragEnded;
                 out.window = e.user.windowID;
@@ -488,17 +520,21 @@ bool Platform::waitEvent(PlatformEvent& out, double timeoutSeconds) {
     // During an outgoing drag the drop target asks for the data over our own Wayland queue, which SDL's wait
     // doesn't report: wake up often enough to answer.
     if (wayland::dragActive() && (ms < 0 || ms > 15)) ms = 15;
+    if (wayland::scrollGestureActive() && (ms < 0 || ms > 8)) ms = 8;  // notice the fingers lifting
     while (SDL_WaitEventTimeout(&e, ms)) {
         wayland::dispatch();
+        forwardScrollStop();
         if (translate(e, out)) return true;
         ms = 0;  // swallowed an untranslated event; don't block again past the deadline
     }
     wayland::dispatch();
+    forwardScrollStop();
     return false;
 }
 
 bool Platform::pollEvent(PlatformEvent& out) {
     wayland::dispatch();
+    forwardScrollStop();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (translate(e, out)) return true;

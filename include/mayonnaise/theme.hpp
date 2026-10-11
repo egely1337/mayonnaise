@@ -16,6 +16,8 @@ enum class TextStyle : std::uint8_t {
 };
 
 enum class FontWeight : std::uint16_t {
+    Thin = 200,
+    Light = 300,
     Regular = 400,
     Medium = 500,
     Semibold = 600,

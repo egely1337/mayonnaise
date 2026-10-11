@@ -15,6 +15,7 @@
 #include "layout.hpp"
 #include "painter.hpp"
 #include "popup.hpp"
+#include "scroll_physics.hpp"
 #include "settings.hpp"
 #include "theme.hpp"
 #include "video.hpp"

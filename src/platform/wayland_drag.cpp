@@ -20,6 +20,9 @@ bool startFileDrag(void*, void*, const std::vector<std::string>&, std::function<
 void dispatch() {}
 bool dragActive() { return false; }
 void prepare(void*) {}
+int scrollSource() { return -1; }
+bool scrollGestureActive() { return false; }
+bool takeScrollStop() { return false; }
 
 #else
 
@@ -102,6 +105,11 @@ struct State {
     wl_proxy* manager = nullptr;
     wl_proxy* device = nullptr;
     std::uint32_t pressSerial = 0;  // last button press on our surfaces
+    int axisSource = -1;            // of the latest scroll frame: 0 wheel, 1 finger, 2 continuous, 3 tilt
+    bool axisStopInFrame = false;
+    bool axisInFrame = false;
+    bool gestureOpen = false;       // touchpad scrolling seen, fingers not lifted yet
+    bool scrollStopped = false;     // fingers lifted; not yet taken by the event loop
     bool failed = false;
 
     wl_proxy* source = nullptr;
@@ -153,7 +161,8 @@ void registryGlobal(void* /*data*/, wl_proxy* registry, std::uint32_t name, cons
         const std::uint32_t v = version < want ? version : want;
         return lib().marshal(registry, kRegistryBind, interface, v, 0, name, ifaceName, v, nullptr);
     };
-    if (!g.seat && std::strcmp(iface, "wl_seat") == 0) g.seat = bind(lib().seatIface, "wl_seat", 3);
+    // v5 pointers report the scroll source and when the fingers lift (axis_source / axis_stop).
+    if (!g.seat && std::strcmp(iface, "wl_seat") == 0) g.seat = bind(lib().seatIface, "wl_seat", 5);
     if (!g.manager && std::strcmp(iface, "wl_data_device_manager") == 0)
         g.manager = bind(lib().managerIface, "wl_data_device_manager", 3);
 }
@@ -166,15 +175,28 @@ void pointerMotion(void*, wl_proxy*, std::uint32_t, std::int32_t, std::int32_t) 
 void pointerButton(void*, wl_proxy*, std::uint32_t serial, std::uint32_t, std::uint32_t, std::uint32_t state) {
     if (state == 1) g.pressSerial = serial;  // WL_POINTER_BUTTON_STATE_PRESSED
 }
-void pointerAxis(void*, wl_proxy*, std::uint32_t, std::uint32_t, std::int32_t) {}
+void pointerAxis(void*, wl_proxy*, std::uint32_t, std::uint32_t, std::int32_t) { g.axisInFrame = true; }
+void pointerFrame(void*, wl_proxy*) {
+    if (g.axisInFrame && (g.axisSource == 1 || g.axisSource == 2)) g.gestureOpen = true;
+    if (g.axisStopInFrame) {
+        g.scrollStopped = g.gestureOpen;
+        g.gestureOpen = false;
+    }
+    g.axisInFrame = false;
+    g.axisStopInFrame = false;
+}
+void pointerAxisSource(void*, wl_proxy*, std::uint32_t source) { g.axisSource = static_cast<int>(source); }
+void pointerAxisStop(void*, wl_proxy*, std::uint32_t, std::uint32_t) { g.axisStopInFrame = true; }
+void pointerAxisDiscrete(void*, wl_proxy*, std::uint32_t, std::int32_t) {}
 
 void (*kPointerListener[])(void) = {
-    reinterpret_cast<void (*)()>(pointerEnter),  reinterpret_cast<void (*)()>(pointerLeave),
-    reinterpret_cast<void (*)()>(pointerMotion), reinterpret_cast<void (*)()>(pointerButton),
-    reinterpret_cast<void (*)()>(pointerAxis),
-    // wl_pointer v5+ events; we bind v3, but keep slots so an unexpected event can't hit a null entry.
-    reinterpret_cast<void (*)()>(noop),          reinterpret_cast<void (*)()>(noop),
-    reinterpret_cast<void (*)()>(noop),          reinterpret_cast<void (*)()>(noop),
+    reinterpret_cast<void (*)()>(pointerEnter),      reinterpret_cast<void (*)()>(pointerLeave),
+    reinterpret_cast<void (*)()>(pointerMotion),     reinterpret_cast<void (*)()>(pointerButton),
+    reinterpret_cast<void (*)()>(pointerAxis),       reinterpret_cast<void (*)()>(pointerFrame),
+    reinterpret_cast<void (*)()>(pointerAxisSource), reinterpret_cast<void (*)()>(pointerAxisStop),
+    reinterpret_cast<void (*)()>(pointerAxisDiscrete),
+    // v8+ events (value120, relative direction) are never sent to a v5 pointer; slots for safety.
+    reinterpret_cast<void (*)()>(noop),              reinterpret_cast<void (*)()>(noop),
 };
 
 void seatCapabilities(void*, wl_proxy* seat, std::uint32_t caps) {
@@ -289,6 +311,16 @@ void dispatch() {
 }
 
 bool dragActive() { return g.source != nullptr; }
+
+int scrollSource() { return g.axisSource; }
+
+bool scrollGestureActive() { return g.gestureOpen; }
+
+bool takeScrollStop() {
+    const bool stopped = g.scrollStopped;
+    g.scrollStopped = false;
+    return stopped;
+}
 
 #endif
 

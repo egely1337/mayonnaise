@@ -15,4 +15,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_sources(mayonnaise_tests PRIVATE test_terminal_screen.cpp ${PROJECT_SOURCE_DIR}/applications/terminal/screen.cpp)
   target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/applications/terminal)
 endif()
+# So is the calculator's arithmetic.
+target_sources(mayonnaise_tests PRIVATE test_calculator_engine.cpp ${PROJECT_SOURCE_DIR}/applications/calculator/engine.cpp)
+target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/applications/calculator)
 add_test(NAME mayonnaise_tests COMMAND mayonnaise_tests)

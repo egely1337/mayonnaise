@@ -100,6 +100,7 @@ void QuickLookView::setEntry(const FileEntry& e) {
     m_image.reset();
     m_lines.clear();
     m_scroll = 0;
+    m_physics.setOffset({});
     m_isText = false;
     m_childCount = 0;
     if (e.isDir) {
@@ -189,6 +190,11 @@ void QuickLookView::drawPanel(Painter& p) {
         Rect pic{b.center().x - iw * k * 0.5f, b.center().y - ih * k * 0.5f, iw * k, ih * k};
         p.drawImage(pic, *m_image);
     } else if (m_isText) {
+        if (m_physics.isAnimating()) {
+            if (m_physics.step(now())) requestAnimationFrame();
+            else if (host() && m_physics.deadline() >= 0) host()->scheduleFrame(m_physics.deadline());
+            m_scroll = m_physics.offset().y;
+        }
         p.fillRect(b, c.contentBackground);
         const Font f = t.font(TextStyle::Callout);
         const float top = b.y + 12 - m_scroll;
@@ -272,7 +278,11 @@ bool QuickLookView::onScroll(const ScrollEvent& e) {
     if (!m_isText) return true;
     const float content = static_cast<float>(m_lines.size()) * kTextLine + 24;
     const float maxScroll = std::max(0.0f, content - body().height);
-    m_scroll = std::clamp(m_scroll + e.delta.y, 0.0f, maxScroll);
+    m_physics.setLimits({0, maxScroll}, body().size());
+    if (!m_physics.handle(e, now())) return true;
+    m_scroll = m_physics.offset().y;
+    if (m_physics.isAnimating()) requestAnimationFrame();
+    if (host() && m_physics.deadline() >= 0) host()->scheduleFrame(m_physics.deadline());
     invalidate();
     return true;
 }

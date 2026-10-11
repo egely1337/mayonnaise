@@ -559,6 +559,16 @@ int main(int argc, char** argv) {
                 v->sendInput("\r");
             }
         });
+        // MAYO_DEMO_SCROLL=<points>: afterwards, a touchpad swipe back into the history (smooth scrolling).
+        if (const char* scroll = std::getenv("MAYO_DEMO_SCROLL")) {
+            const float points = std::strtof(scroll, nullptr);
+            app.after(1.5, [&, points] {
+                if (TerminalView* v = current()) {
+                    const Point at = v->frame().center();
+                    v->onScroll(ScrollEvent{at, {0, -points}, true, Modifiers::None});
+                }
+            });
+        }
     }
     return app.run();
 }

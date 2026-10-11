@@ -85,13 +85,27 @@ the alternate screen, mouse reporting, bracketed paste and OSC titles / working 
 scrollback that re-wraps when the window is resized; tabs; selection (double-click words, triple-click
 lines), Ctrl+click links, colour profiles (Basic follows light/dark, Pro, Homebrew, Ocean, Solarized) and the
 system's monospace font with automatic fallbacks for CJK and symbols. Box drawing, block and braille
-characters are drawn as geometry, so `btop` and friends look right.
+characters are drawn as geometry, so `btop` and friends look right. The history scrolls smoothly with the same
+touchpad physics as every scroll view, and floods of output (`cat huge.log`) are parsed in slices between
+frames, so typing and scrolling stay responsive.
 
 ```sh
 ./build/applications/terminal/terminal ~/Projects
 ```
 
 ![Terminal](docs/screenshots/terminal.png)
+
+### Calculator example
+
+`applications/calculator` is a Calculator-style calculator: a basic keypad and a scientific one (Ctrl+1 / Ctrl+2
+or the key at the bottom left) with whole expressions, precedence and parentheses (2 + 3 × 4 = 14), memory,
+2nd functions, degrees/radians, percent the way macOS does it (50 + 10 % = 55), repeated "=", the keyboard
+and numpad, copy/paste, and numbers grouped the way the user's locale writes them (1.234,5 in Turkish). The
+arithmetic (`engine.cpp`) has no UI dependencies and is unit tested.
+
+![Calculator](docs/screenshots/calculator.png)
+
+![Calculator, scientific](docs/screenshots/calculator-scientific.png)
 
 ### Settings
 
@@ -166,7 +180,7 @@ failing.
 
 `packaging/arch/PKGBUILD` builds a split package from the committed tree: `mayonnaise-git` (static library,
 headers, CMake package) and one package per app, plus `mayo-apps-git` for all of them. Apps install to
-`/usr/bin` as `finder`, `terminal`, `taskmanager`, `photos`, `video_player` and `systemsettings`, each with a
+`/usr/bin` as `finder`, `terminal`, `taskmanager`, `photos`, `video_player`, `systemsettings` and `calculator`, each with a
 desktop entry and a macOS-style icon:
 
 ![App icons](docs/screenshots/app-icons.png)

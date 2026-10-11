@@ -178,6 +178,36 @@ def settings():
     return icon(defs, body, "url(#bg)")
 
 
+def calculator():
+    defs = grad("bg", (0, "#4A4A50"), (1, "#1C1C1F"))
+    defs += grad("orange", (0, "#FFB340"), (1, "#FF8A00"))
+    defs += grad("key", (0, "#6E6E74"), (1, "#56565C"))
+    keys = []
+    r = 50
+    for row in range(4):
+        for col in range(4):
+            cx = 272 + col * 160
+            cy = 352 + row * 128
+            if col == 3:
+                fill = "url(#orange)"
+            elif row == 0:
+                fill = "#A5A5AA"
+            else:
+                fill = "url(#key)"
+            keys.append(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>')
+    glyphs = (
+        '<rect x="726" y="347" width="52" height="10" rx="5" fill="#fff"/>'  # minus on the top operator
+        '<rect x="726" y="475" width="52" height="10" rx="5" fill="#fff"/><rect x="747" y="454" width="10" height="52" rx="5" fill="#fff"/>'
+        '<rect x="726" y="597" width="52" height="10" rx="5" fill="#fff"/><rect x="726" y="617" width="52" height="10" rx="5" fill="#fff"/>'
+        '<rect x="726" y="731" width="52" height="10" rx="5" fill="#fff"/>'
+    )
+    body = f"""      <rect x="212" y="196" width="600" height="80" rx="24" fill="#000" opacity="0.28"/>
+      <text x="780" y="262" font-family="Inter, sans-serif" font-size="64" font-weight="300" fill="#fff" text-anchor="end">42</text>
+      <g filter="url(#soft)">{"".join(keys)}</g>
+      {glyphs}"""
+    return icon(defs, body, "url(#bg)")
+
+
 ICONS = {
     "finder": ("Finder", finder),
     "terminal": ("Terminal", terminal),
@@ -185,6 +215,7 @@ ICONS = {
     "photos": ("Photos", photos),
     "video_player": ("VideoPlayer", videoplayer),
     "system_settings": ("Settings", settings),
+    "calculator": ("Calculator", calculator),
 }
 
 for folder, (name, fn) in ICONS.items():

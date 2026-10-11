@@ -31,6 +31,9 @@ public:
     void setTitleVisible(bool visible);
     [[nodiscard]] const std::string& title() const;
     [[nodiscard]] Size size() const;
+    /// Resizes the window (points), e.g. when switching to a larger mode. Ignored while maximized or full screen.
+    void setSize(Size size);
+    void setMinimumSize(Size size);
     void close();
     /// Brings the window to the front (the compositor may only flash it on Wayland).
     void raise();

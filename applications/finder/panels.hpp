@@ -74,7 +74,8 @@ private:
     std::vector<std::string> m_lines;  // text preview
     bool m_isText = false;
     size_t m_childCount = 0;
-    float m_scroll = 0;
+    float m_scroll = 0;  // follows m_physics
+    mayo::ScrollPhysics m_physics;
     int m_hover = -1;  // 0 close, 1 open
 };
 

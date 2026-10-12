@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <span>
+#include <tuple>
 
 #include "embedded.hpp"
 
@@ -12,89 +14,82 @@ namespace mayo::render {
 
 namespace {
 constexpr float kNoClip = 1e7f;
-constexpr size_t kStreamBytes = 512 * 1024;  // instance ring buffer; grows for huge batches
-}
 
-Renderer2D::Renderer2D() {
+#ifdef MAYONNAISE_HAS_VULKAN
+std::span<const unsigned char> spirv(std::span<const unsigned char> code) { return code; }
+#define MAYO_SPIRV(name) spirv(embedded::name##_spv)
+#else
+#define MAYO_SPIRV(name) std::span<const unsigned char>()
+#endif
+}  // namespace
+
+Renderer2D::Renderer2D() : m_device(*rhi::device()) {
     using embedded::text;
-    m_program = gl::makeProgram(text(embedded::ui_vert), text(embedded::ui_frag), "ui");
-    m_blurDown = gl::makeProgram(text(embedded::fullscreen_vert), text(embedded::blur_down_frag), "blur_down");
-    m_blurUp = gl::makeProgram(text(embedded::fullscreen_vert), text(embedded::blur_up_frag), "blur_up");
-    m_uViewport = glGetUniformLocation(m_program.id(), "u_viewport");
-    m_uTexture = glGetUniformLocation(m_program.id(), "u_texture");
-    m_uTexture1 = glGetUniformLocation(m_program.id(), "u_texture1");
-    m_uTexture2 = glGetUniformLocation(m_program.id(), "u_texture2");
-
-    m_vao = gl::makeVertexArray();
-    m_emptyVao = gl::makeVertexArray();
-    m_instanceBuffer = gl::makeBuffer();
-    glBindVertexArray(m_vao.id());
-    glBindBuffer(GL_ARRAY_BUFFER, m_instanceBuffer.id());
-    for (GLuint i = 0; i < 10; ++i) {
-        glEnableVertexAttribArray(i);
-        glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(Instance),
-                              reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i * 4 * sizeof(float))));
-        glVertexAttribDivisor(i, 1);
+    m_program = m_device.createPipeline({
+        .name = "ui",
+        .vertexGlsl = text(embedded::ui_vert),
+        .fragmentGlsl = text(embedded::ui_frag),
+        .vertexSpirv = MAYO_SPIRV(ui_vert),
+        .fragmentSpirv = MAYO_SPIRV(ui_frag),
+        .instanceVec4s = static_cast<int>(sizeof(Instance) / 16),
+        .textures = {"u_texture", "u_texture1", "u_texture2"},
+        .uniforms = {{"u_viewport", 2, 0}},
+        .blend = rhi::Blend::Premultiplied,
+        .topology = rhi::Topology::TriangleStrip,
+    });
+    for (auto [pipeline, name, frag, fragSpirv] :
+         {std::tuple{&m_blurDown, "blur_down", text(embedded::blur_down_frag), MAYO_SPIRV(blur_down_frag)},
+          std::tuple{&m_blurUp, "blur_up", text(embedded::blur_up_frag), MAYO_SPIRV(blur_up_frag)}}) {
+        *pipeline = m_device.createPipeline({
+            .name = name,
+            .vertexGlsl = text(embedded::fullscreen_vert),
+            .fragmentGlsl = frag,
+            .vertexSpirv = MAYO_SPIRV(fullscreen_vert),
+            .fragmentSpirv = fragSpirv,
+            .textures = {"u_source"},
+            .uniforms = {{"u_halfPixel", 2, 0}, {"u_offset", 1, 8}},
+        });
     }
-    glBindVertexArray(0);
-
-    // A 1x1 white texture keeps the sampler valid for batches that never sample.
-    m_whiteTexture = gl::makeTexture();
-    glBindTexture(GL_TEXTURE_2D, m_whiteTexture.id());
-    const std::uint8_t white[4] = {255, 255, 255, 255};
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
     m_instances.reserve(4096);
 }
 
 Renderer2D::~Renderer2D() = default;
 
-void Renderer2D::beginFrame(int pixelWidth, int pixelHeight, float scale) {
+void Renderer2D::ensureTarget(std::unique_ptr<rhi::Texture>& target, int width, int height) {
+    width = std::max(1, width);
+    height = std::max(1, height);
+    if (target && target->width() == width && target->height() == height) return;
+    target = m_device.createTexture({.width = width, .height = height, .renderTarget = true});
+}
+
+void Renderer2D::beginFrame(platform::PlatformWindow& window, int pixelWidth, int pixelHeight, float scale) {
     m_width = std::max(1, pixelWidth);
     m_height = std::max(1, pixelHeight);
     m_scale = scale;
-    m_scene.ensure(m_width, m_height);
+    m_device.beginFrame(window);
+    ensureTarget(m_scene, m_width, m_height);
     m_clips.clear();
     m_clips.push_back({-kNoClip, -kNoClip, kNoClip, kNoClip, -kNoClip, -kNoClip, kNoClip, kNoClip, 0});
     m_opacity.assign(1, 1.0f);
     m_instances.clear();
-    m_batchTexture = 0;
+    m_batchTexture = nullptr;
     m_drawCalls = 0;
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_scene.fbo.id());
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_SCISSOR_TEST);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
+    const float transparent[4] = {0, 0, 0, 0};
+    m_device.beginPass(*m_scene, transparent);
 }
 
 void Renderer2D::endFrame() {
     flush();
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene.fbo.id());
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     m_drawCallsLast = m_drawCalls;
 }
 
+void Renderer2D::present(platform::PlatformWindow& window) { m_device.endFrame(window, *m_scene); }
+
 std::vector<std::uint8_t> Renderer2D::readPixels(int& width, int& height) {
     flush();
-    width = m_scene.width;
-    height = m_scene.height;
-    std::vector<std::uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_scene.fbo.id());
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    // GL rows are bottom-up.
-    const size_t stride = static_cast<size_t>(width) * 4;
-    for (int y = 0; y < height / 2; ++y) {
-        std::swap_ranges(pixels.begin() + static_cast<std::ptrdiff_t>(y * stride),
-                         pixels.begin() + static_cast<std::ptrdiff_t>((y + 1) * stride),
-                         pixels.begin() + static_cast<std::ptrdiff_t>((height - 1 - y) * stride));
-    }
-    return pixels;
+    width = m_scene->width();
+    height = m_scene->height();
+    return m_device.readPixels(*m_scene);
 }
 
 // --- submission ------------------------------------------------------------------------------
@@ -112,7 +107,7 @@ bool Renderer2D::culled(float l, float t, float r, float b) const {
     return r <= c.l || b <= c.t || l >= c.r || t >= c.b || r <= l || b <= t;
 }
 
-Renderer2D::Instance& Renderer2D::push(Type type, float l, float t, float r, float b, GLuint texture) {
+Renderer2D::Instance& Renderer2D::push(Type type, float l, float t, float r, float b, rhi::Texture* texture) {
     if (texture && texture != m_batchTexture) {
         if (!m_instances.empty() && m_batchTexture) flush();
         m_batchTexture = texture;
@@ -158,7 +153,7 @@ void Renderer2D::fillRoundedRect(const Rect& rect, const CornerRadii& radii, con
     if (r <= l || b <= t) return;
     if (fill.a <= 0 && (border.a <= 0 || borderWidth <= 0)) return;
     if (culled(l - 1, t - 1, r + 1, b + 1)) return;
-    Instance& in = push(Type::Fill, l - 1, t - 1, r + 1, b + 1, 0);
+    Instance& in = push(Type::Fill, l - 1, t - 1, r + 1, b + 1, nullptr);
     in.shape[0] = (l + r) * 0.5f;
     in.shape[1] = (t + b) * 0.5f;
     in.shape[2] = (r - l) * 0.5f;
@@ -185,7 +180,7 @@ void Renderer2D::fillGradient(const Rect& rect, const CornerRadii& radii, const 
     float r = std::round(rect.right() * s);
     float b = std::round(rect.bottom() * s);
     if (r <= l || b <= t || culled(l - 1, t - 1, r + 1, b + 1)) return;
-    Instance& in = push(Type::Gradient, l - 1, t - 1, r + 1, b + 1, 0);
+    Instance& in = push(Type::Gradient, l - 1, t - 1, r + 1, b + 1, nullptr);
     in.shape[0] = (l + r) * 0.5f;
     in.shape[1] = (t + b) * 0.5f;
     in.shape[2] = (r - l) * 0.5f;
@@ -214,7 +209,7 @@ void Renderer2D::shadow(const Rect& rect, float radius, const Color& color, floa
     float r = shape.right() * s + margin;
     float b = shape.bottom() * s + margin;
     if (culled(l, t, r, b)) return;
-    Instance& in = push(Type::Shadow, l, t, r, b, 0);
+    Instance& in = push(Type::Shadow, l, t, r, b, nullptr);
     in.shape[0] = shape.center().x * s;
     in.shape[1] = shape.center().y * s;
     in.shape[2] = shape.width * 0.5f * s;
@@ -233,7 +228,7 @@ void Renderer2D::line(Point a, Point b, const Color& color, float width) {
     float r = std::max(a.x, b.x) * s + hw + 1;
     float bt = std::max(a.y, b.y) * s + hw + 1;
     if (culled(l, t, r, bt)) return;
-    Instance& in = push(Type::Line, l, t, r, bt, 0);
+    Instance& in = push(Type::Line, l, t, r, bt, nullptr);
     in.shape[0] = a.x * s;
     in.shape[1] = a.y * s;
     in.shape[2] = b.x * s;
@@ -250,7 +245,7 @@ void Renderer2D::triangle(Point a, Point b, Point c, const Color& color, float c
     float rr = std::max({a.x, b.x, c.x}) * s + r + 1;
     float bb = std::max({a.y, b.y, c.y}) * s + r + 1;
     if (culled(l, t, rr, bb)) return;
-    Instance& in = push(Type::Triangle, l, t, rr, bb, 0);
+    Instance& in = push(Type::Triangle, l, t, rr, bb, nullptr);
     in.shape[0] = a.x * s;
     in.shape[1] = a.y * s;
     in.shape[2] = b.x * s;
@@ -268,7 +263,7 @@ void Renderer2D::arc(Point center, float radius, float startAngle, float sweep, 
     float cx = center.x * s;
     float cy = center.y * s;
     if (culled(cx - ext, cy - ext, cx + ext, cy + ext)) return;
-    Instance& in = push(Type::Arc, cx - ext, cy - ext, cx + ext, cy + ext, 0);
+    Instance& in = push(Type::Arc, cx - ext, cy - ext, cx + ext, cy + ext, nullptr);
     in.shape[0] = cx;
     in.shape[1] = cy;
     in.shape[2] = radius * s;
@@ -278,7 +273,7 @@ void Renderer2D::arc(Point center, float radius, float startAngle, float sweep, 
     in.params[1] = hw;
 }
 
-void Renderer2D::image(const Rect& rect, GLuint texture, const Rect& uv, const CornerRadii& radii, float opacity) {
+void Renderer2D::image(const Rect& rect, rhi::Texture* texture, const Rect& uv, const CornerRadii& radii, float opacity) {
     const float s = m_scale;
     float l = std::round(rect.left() * s);
     float t = std::round(rect.top() * s);
@@ -303,7 +298,7 @@ void Renderer2D::image(const Rect& rect, GLuint texture, const Rect& uv, const C
     in.color[3] = opacity * m_opacity.back();
 }
 
-void Renderer2D::video(const Rect& rect, const GLuint (&tex)[3], bool planar, int matrix, bool fullRange,
+void Renderer2D::video(const Rect& rect, rhi::Texture* const (&tex)[3], bool planar, int matrix, bool fullRange,
                        const CornerRadii& radii, float opacity) {
     const float s = m_scale;
     float l = std::round(rect.left() * s);
@@ -334,10 +329,10 @@ void Renderer2D::video(const Rect& rect, const GLuint (&tex)[3], bool planar, in
     in.params[2] = static_cast<float>(matrix);
     in.params[3] = fullRange ? 1.0f : 0.0f;
     flush();
-    m_extraTextures[0] = m_extraTextures[1] = 0;
+    m_extraTextures[0] = m_extraTextures[1] = nullptr;
 }
 
-void Renderer2D::glyphPx(const Rect& px, GLuint atlas, const Rect& uv, const Color& color, float gamma) {
+void Renderer2D::glyphPx(const Rect& px, rhi::Texture* atlas, const Rect& uv, const Color& color, float gamma) {
     if (culled(px.left(), px.top(), px.right(), px.bottom())) return;
     Instance& in = push(Type::Glyph, px.left(), px.top(), px.right(), px.bottom(), atlas);
     in.uv[0] = uv.left();
@@ -356,7 +351,7 @@ void Renderer2D::backdrop(const Rect& rect, const CornerRadii& radii, const Mate
     float b = std::round(rect.bottom() * s);
     if (culled(l, t, r, b)) return;
     flush();
-    GLuint blurred = blurScene(style.blurRadius * s, Rect::fromLTRB(l, t, r, b));
+    rhi::Texture* blurred = blurScene(style.blurRadius * s, Rect::fromLTRB(l, t, r, b));
     Instance& in = push(Type::Backdrop, l - 1, t - 1, r + 1, b + 1, blurred);
     in.shape[0] = (l + r) * 0.5f;
     in.shape[1] = (t + b) * 0.5f;
@@ -421,66 +416,22 @@ void Renderer2D::popOpacity() {
 
 void Renderer2D::flush() {
     if (m_instances.empty()) return;
-    glBindFramebuffer(GL_FRAMEBUFFER, m_scene.fbo.id());
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_SCISSOR_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    glUseProgram(m_program.id());
-    glUniform2f(m_uViewport, static_cast<float>(m_width), static_cast<float>(m_height));
-    glUniform1i(m_uTexture, 0);
-    glUniform1i(m_uTexture1, 1);
-    glUniform1i(m_uTexture2, 2);
-    for (int i = 0; i < 2; ++i) {
-        glActiveTexture(static_cast<GLenum>(GL_TEXTURE1 + i));
-        glBindTexture(GL_TEXTURE_2D, m_extraTextures[i] ? m_extraTextures[i] : m_whiteTexture.id());
-    }
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_batchTexture ? m_batchTexture : m_whiteTexture.id());
-
-    // Instances stream into one buffer used as a ring: each flush writes after the previous one (unsynchronized,
-    // that range is unused since the last orphan) and points the attributes at it. Re-specifying the whole
-    // buffer on every flush made the driver allocate and cache a fresh buffer per batch, tens of MB of GTT
-    // (system RAM on integrated GPUs) with many batches per frame.
-    glBindVertexArray(m_vao.id());
-    glBindBuffer(GL_ARRAY_BUFFER, m_instanceBuffer.id());
-    const size_t bytes = m_instances.size() * sizeof(Instance);
-    if (bytes > m_streamSize) {
-        m_streamSize = std::max<size_t>(kStreamBytes, std::bit_ceil(bytes));
-        m_streamOffset = m_streamSize;  // forces the orphan below
-    }
-    if (m_streamOffset + bytes > m_streamSize) {
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_streamSize), nullptr, GL_STREAM_DRAW);
-        m_streamOffset = 0;
-    }
-    void* dst = glMapBufferRange(GL_ARRAY_BUFFER, static_cast<GLintptr>(m_streamOffset), static_cast<GLsizeiptr>(bytes),
-                                 GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
-    if (dst) {
-        std::memcpy(dst, m_instances.data(), bytes);
-        glUnmapBuffer(GL_ARRAY_BUFFER);
-    } else {
-        glBufferSubData(GL_ARRAY_BUFFER, static_cast<GLintptr>(m_streamOffset), static_cast<GLsizeiptr>(bytes),
-                        m_instances.data());
-    }
-    for (GLuint i = 0; i < 10; ++i) {
-        glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(Instance),
-                              reinterpret_cast<const void*>(m_streamOffset + i * 4 * sizeof(float)));
-    }
-    m_streamOffset += (bytes + 255) & ~size_t{255};
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(m_instances.size()));
-    glBindVertexArray(0);
+    m_device.beginPass(*m_scene);
+    const float viewport[2] = {static_cast<float>(m_width), static_cast<float>(m_height)};
+    rhi::Texture* const textures[3] = {m_batchTexture, m_extraTextures[0], m_extraTextures[1]};
+    m_device.draw(*m_program, textures, viewport, sizeof viewport,
+                  std::as_bytes(std::span(m_instances)), 4, static_cast<int>(m_instances.size()));
     ++m_drawCalls;
     m_instances.clear();
-    m_batchTexture = 0;
+    m_batchTexture = nullptr;
 }
 
-GLuint Renderer2D::blurScene(float radiusPx, const Rect& regionPx) {
+rhi::Texture* Renderer2D::blurScene(float radiusPx, const Rect& regionPx) {
     // Each dual-Kawase level roughly doubles the blur radius.
     int levels = std::clamp(static_cast<int>(std::ceil(std::log2(std::max(radiusPx, 2.0f) / 2.5f))), 1, 6);
     if (static_cast<int>(m_blurChain.size()) < levels) m_blurChain.resize(static_cast<size_t>(levels));
-    for (int i = 0; i < levels; ++i) {
-        m_blurChain[static_cast<size_t>(i)].ensure(std::max(1, m_width >> (i + 1)), std::max(1, m_height >> (i + 1)));
-    }
+    for (int i = 0; i < levels; ++i)
+        ensureTarget(m_blurChain[static_cast<size_t>(i)], m_width >> (i + 1), m_height >> (i + 1));
 
     // Only blur around the region that will be sampled (plus the kernel footprint).
     const float margin = radiusPx * 2.0f + 16.0f;
@@ -488,53 +439,35 @@ GLuint Renderer2D::blurScene(float radiusPx, const Rect& regionPx) {
     auto scissorFor = [&](int w, int h) {
         float kx = static_cast<float>(w) / static_cast<float>(m_width);
         float ky = static_cast<float>(h) / static_cast<float>(m_height);
-        // Rect is top-down; GL scissor is bottom-up.
+        // Rect is top-down; target rows are bottom-up (rhi.hpp).
         int x0 = static_cast<int>(std::floor(area.left() * kx));
         int x1 = static_cast<int>(std::ceil(area.right() * kx));
         int y0 = static_cast<int>(std::floor((static_cast<float>(m_height) - area.bottom()) * ky));
         int y1 = static_cast<int>(std::ceil((static_cast<float>(m_height) - area.top()) * ky));
-        glScissor(x0, y0, x1 - x0, y1 - y0);
+        return rhi::Scissor{x0, y0, x1 - x0, y1 - y0};
     };
 
-    glDisable(GL_BLEND);
-    glEnable(GL_SCISSOR_TEST);
-    glBindVertexArray(m_emptyVao.id());
-    glActiveTexture(GL_TEXTURE0);
-
-    auto pass = [&](const gl::Program& program, GLuint srcTex, int srcW, int srcH, const gl::RenderTarget& dst) {
-        glBindFramebuffer(GL_FRAMEBUFFER, dst.fbo.id());
-        glViewport(0, 0, dst.width, dst.height);
-        scissorFor(dst.width, dst.height);
-        glUseProgram(program.id());
-        glUniform1i(glGetUniformLocation(program.id(), "u_source"), 0);
-        glUniform2f(glGetUniformLocation(program.id(), "u_halfPixel"), 0.5f / static_cast<float>(srcW),
-                    0.5f / static_cast<float>(srcH));
-        glUniform1f(glGetUniformLocation(program.id(), "u_offset"), 1.0f);
-        glBindTexture(GL_TEXTURE_2D, srcTex);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+    auto pass = [&](rhi::Pipeline& pipeline, rhi::Texture* src, rhi::Texture& dst) {
+        m_device.beginPass(dst);
+        const rhi::Scissor scissor = scissorFor(dst.width(), dst.height());
+        m_device.setScissor(&scissor);
+        const float uniforms[3] = {0.5f / static_cast<float>(src->width()), 0.5f / static_cast<float>(src->height()),
+                                   1.0f};
+        rhi::Texture* const textures[1] = {src};
+        m_device.draw(pipeline, textures, uniforms, sizeof uniforms, {}, 3, 1);
     };
 
-    GLuint src = m_scene.texture.id();
-    int sw = m_width;
-    int sh = m_height;
+    rhi::Texture* src = m_scene.get();
     for (int i = 0; i < levels; ++i) {
-        auto& dst = m_blurChain[static_cast<size_t>(i)];
-        pass(m_blurDown, src, sw, sh, dst);
-        src = dst.texture.id();
-        sw = dst.width;
-        sh = dst.height;
+        auto& dst = *m_blurChain[static_cast<size_t>(i)];
+        pass(*m_blurDown, src, dst);
+        src = &dst;
     }
-    for (int i = levels - 1; i > 0; --i) {
-        auto& from = m_blurChain[static_cast<size_t>(i)];
-        auto& dst = m_blurChain[static_cast<size_t>(i - 1)];
-        pass(m_blurUp, from.texture.id(), from.width, from.height, dst);
-    }
+    for (int i = levels - 1; i > 0; --i)
+        pass(*m_blurUp, m_blurChain[static_cast<size_t>(i)].get(), *m_blurChain[static_cast<size_t>(i - 1)]);
 
-    glDisable(GL_SCISSOR_TEST);
-    glEnable(GL_BLEND);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_scene.fbo.id());
-    glViewport(0, 0, m_width, m_height);
-    return m_blurChain[0].texture.id();
+    m_device.beginPass(*m_scene);
+    return m_blurChain[0].get();
 }
 
 }  // namespace mayo::render

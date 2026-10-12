@@ -1,25 +1,39 @@
 #version 330 core
+#ifdef VULKAN
+// The same source is compiled to SPIR-V; GLSL 330 needs these for explicit locations and bindings.
+#extension GL_ARB_separate_shader_objects : require
+#extension GL_ARB_shading_language_420pack : require
+#define LOC(n) layout(location = n)
+#define BINDING(n) layout(set = 0, binding = n)
+#else
+#define LOC(n)
+#define BINDING(n)
+#endif
 // Uber-shader for every 2D primitive. Shapes are signed distance fields evaluated in pixels, so
 // edges are anti-aliased over exactly one device pixel at any scale.
 
-in vec2 v_pixel;
-in vec2 v_uv;
-flat in vec4 v_shape;
-flat in vec4 v_radii;
-flat in vec4 v_color;
-flat in vec4 v_color2;
-flat in vec4 v_gradient;
-flat in vec4 v_params;
-flat in vec4 v_clip;
-flat in vec4 v_rclip;
-flat in vec4 v_clip2;
+LOC(0) in vec2 v_pixel;
+LOC(1) in vec2 v_uv;
+LOC(2) flat in vec4 v_shape;
+LOC(3) flat in vec4 v_radii;
+LOC(4) flat in vec4 v_color;
+LOC(5) flat in vec4 v_color2;
+LOC(6) flat in vec4 v_gradient;
+LOC(7) flat in vec4 v_params;
+LOC(8) flat in vec4 v_clip;
+LOC(9) flat in vec4 v_rclip;
+LOC(10) flat in vec4 v_clip2;
 
-uniform sampler2D u_texture;
-uniform sampler2D u_texture1;  // video chroma (UV, or U)
-uniform sampler2D u_texture2;  // video V (planar formats)
+BINDING(0) uniform sampler2D u_texture;
+BINDING(1) uniform sampler2D u_texture1;  // video chroma (UV, or U)
+BINDING(2) uniform sampler2D u_texture2;  // video V (planar formats)
+#ifdef VULKAN
+layout(push_constant) uniform Push { vec2 u_viewport; };
+#else
 uniform vec2 u_viewport;
+#endif
 
-out vec4 o_color;
+LOC(0) out vec4 o_color;
 
 const int kFill = 0;
 const int kShadow = 1;

@@ -5,7 +5,7 @@
 #include <string>
 
 #include "../render/font.hpp"
-#include "../render/gl.hpp"
+#include "../render/rhi/rhi.hpp"
 #include "../render/renderer2d.hpp"
 #include "app_impl.hpp"
 #include "mayonnaise/app.hpp"
@@ -113,6 +113,7 @@ Window::Impl::Impl(const platform::WindowConfig& config)
 }
 
 Window::Impl::~Impl() {
+    if (rhi::Device* device = rhi::device()) device->releaseWindow(*platformWindow);
     platformWindow->setHitTest(nullptr);
     root->setHost(nullptr);
 }
@@ -368,7 +369,6 @@ void Window::Impl::render() {
     inFrame = true;
     if (needsLayout) layout();
 
-    platformWindow->makeCurrent();
     int w = 0;
     int h = 0;
     platformWindow->pixelSize(w, h);
@@ -377,7 +377,7 @@ void Window::Impl::render() {
     auto& r = *app.impl().renderer;
     Size size = platformWindow->sizeInPoints();
     const float scale = static_cast<float>(w) / std::max(1.0f, size.width);
-    r.beginFrame(w, h, scale);
+    r.beginFrame(*platformWindow, w, h, scale);
     Painter painter(r, *app.impl().text);
 
     static const std::string testScene = std::getenv("MAYO_TEST_SCENE") ? std::getenv("MAYO_TEST_SCENE") : "";
@@ -416,7 +416,7 @@ void Window::Impl::render() {
             since = frameTime;
         }
     }
-    platformWindow->swapBuffers();
+    r.present(*platformWindow);
 }
 
 }  // namespace mayo

@@ -8,6 +8,7 @@
 
 #include "../platform/platform.hpp"
 #include "../render/renderer2d.hpp"
+#include "../render/rhi/rhi.hpp"
 #include "../render/text_system.hpp"
 #include "mayonnaise/app.hpp"
 #include "mayonnaise/window.hpp"
@@ -34,7 +35,8 @@ struct App::Impl {
     std::vector<Timer> timers;
     std::mutex timersMutex;  // post() may be called from worker threads
     void runDueTimers();
-    std::unique_ptr<render::Renderer2D> renderer;  // shared by all windows (one GL context)
+    std::unique_ptr<rhi::Device> device;           // Vulkan or OpenGL, shared by all windows
+    std::unique_ptr<render::Renderer2D> renderer;  // shared by all windows
     std::unique_ptr<render::TextSystem> text;
     bool quitRequested = false;
     int exitCode = 0;

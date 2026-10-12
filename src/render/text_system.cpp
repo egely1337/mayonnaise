@@ -21,41 +21,10 @@ void TextSystem::reset(int size) {
     m_shelfY = kPadding;
     m_shelfHeight = 0;
     m_entries.clear();
-    if (!m_atlas) m_atlas = gl::makeTexture();
-    glBindTexture(GL_TEXTURE_2D, m_atlas.id());
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size, size, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
-    // Glyph quads land on whole pixels, so nearest sampling is exact and avoids bleeding.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    // glTexImage2D with null data leaves contents undefined; clear so padding stays empty. Clearing through
-    // a framebuffer avoids uploading a zero buffer (up to 16 MB) through the driver's staging memory.
-    // This can run mid-frame (atlas full), so the caller's framebuffer state is restored afterwards.
-    GLint previous = 0;
-    GLint viewport[4] = {};
-    GLfloat clearColor[4] = {};
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous);
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
-    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
-    gl::Framebuffer fb = gl::makeFramebuffer();
-    glBindFramebuffer(GL_FRAMEBUFFER, fb.id());
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_atlas.id(), 0);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-        glDisable(GL_SCISSOR_TEST);
-        glViewport(0, 0, size, size);
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-    } else {
-        std::vector<std::uint8_t> zeros(static_cast<size_t>(size) * static_cast<size_t>(size), 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, size, size, GL_RED, GL_UNSIGNED_BYTE, zeros.data());
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previous));
-    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
-    if (scissor) glEnable(GL_SCISSOR_TEST);
+    // Glyph quads land on whole pixels, so nearest sampling is exact and avoids bleeding. Starts out cleared,
+    // so the padding between glyphs stays empty.
+    m_atlas = rhi::device()->createTexture(
+        {.width = size, .height = size, .format = rhi::Format::R8, .filter = rhi::Filter::Nearest});
 }
 
 bool TextSystem::allocate(int w, int h, int& x, int& y) {
@@ -88,14 +57,11 @@ const TextSystem::Entry& TextSystem::glyph(char32_t cp, const Font& font, float 
         int y = 0;
         if (!allocate(m_scratch.width, m_scratch.height, x, y)) {
             // Atlas full: draw what's queued against the old contents, then start over bigger.
-            renderer.flushIfUsing(m_atlas.id());
+            renderer.flushIfUsing(m_atlas.get());
             reset(std::min(m_size * 2, kMaxAtlas));
             allocate(m_scratch.width, m_scratch.height, x, y);
         }
-        glBindTexture(GL_TEXTURE_2D, m_atlas.id());
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, m_scratch.width, m_scratch.height, GL_RED, GL_UNSIGNED_BYTE,
-                        m_scratch.pixels.data());
+        rhi::device()->upload(*m_atlas, x, y, m_scratch.width, m_scratch.height, m_scratch.pixels.data());
         auto fs = static_cast<float>(m_size);
         e.uv = Rect(static_cast<float>(x) / fs, static_cast<float>(y) / fs, static_cast<float>(m_scratch.width) / fs,
                     static_cast<float>(m_scratch.height) / fs);
@@ -126,7 +92,7 @@ void TextSystem::drawLine(Renderer2D& renderer, std::string_view text, Point bas
         if (e.width > 0) {
             Rect quad(x + static_cast<float>(e.left), baselinePx - static_cast<float>(e.top),
                       static_cast<float>(e.width), static_cast<float>(e.height));
-            renderer.glyphPx(quad, m_atlas.id(), e.uv, color, gamma);
+            renderer.glyphPx(quad, m_atlas.get(), e.uv, color, gamma);
         }
         penPx += lib.advance(cp, font) * s;
     }

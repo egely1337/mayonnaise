@@ -19,13 +19,13 @@ pkgname=(mayonnaise-git
          mayo-video-player-git
          mayo-system-settings-git
          mayo-calculator-git)
-pkgver=0.1.0.r28.47abdd8
+pkgver=0.1.0.r29.5489758
 pkgrel=1
-pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3, and apps built with it'
+pkgdesc='macOS-style (Liquid Glass) C++20 UI library on Vulkan or OpenGL, and apps built with it'
 arch=(x86_64)
 url='https://github.com/egely1337/mayonnaise'
 license=(LicenseRef-custom OFL-1.1)
-makedepends=(git cmake pkgconf sdl3 freetype2 ffmpeg glib2 doctest)
+makedepends=(git cmake pkgconf sdl3 freetype2 ffmpeg glib2 doctest vulkan-headers shaderc)
 # Pinned to master: without a branch, makepkg keeps following whatever branch was checked out when it
 # first cloned, and rebuilds that old commit forever.
 source=("mayonnaise::git+file://${startdir}/../..#branch=master")
@@ -64,9 +64,12 @@ _install_component() {
 # dlopen()ed at run time, so they are real dependencies even though nothing links them.
 _appdeps=(glibc gcc-libs sdl3 freetype2 fontconfig dbus hicolor-icon-theme)
 _dialogs='zenity: file dialogs without an xdg-desktop-portal'
+# libvulkan is loaded at run time too; without it (or a Vulkan 1.3 GPU) the apps render with OpenGL.
+_vulkan='vulkan-icd-loader: Vulkan renderer (OpenGL otherwise)'
 
 package_mayonnaise-git() {
-  pkgdesc='macOS-style (Liquid Glass) C++20 UI library on OpenGL 3.3 (static library, headers, CMake package)'
+  pkgdesc='macOS-style (Liquid Glass) C++20 UI library on Vulkan or OpenGL (static library, headers, CMake package)'
+  optdepends=("$_vulkan")
   depends=(sdl3 freetype2)
   provides=(mayonnaise)
   conflicts=(mayonnaise)
@@ -83,34 +86,35 @@ package_mayo-apps-git() {
 package_mayo-finder-git() {
   pkgdesc='macOS Finder-style file manager (Mayonnaise)'
   depends=("${_appdeps[@]}" xdg-utils)
-  optdepends=("$_dialogs")
+  optdepends=("$_vulkan" "$_dialogs")
   _install_component finder
 }
 
 package_mayo-terminal-git() {
   pkgdesc='macOS Terminal-style terminal emulator (Mayonnaise)'
   depends=("${_appdeps[@]}")
-  optdepends=('xdg-utils: open links with Ctrl+click')
+  optdepends=("$_vulkan" 'xdg-utils: open links with Ctrl+click')
   _install_component terminal
 }
 
 package_mayo-task-manager-git() {
   pkgdesc='Activity Monitor-style task manager (Mayonnaise)'
   depends=("${_appdeps[@]}")
+  optdepends=("$_vulkan")
   _install_component taskmanager
 }
 
 package_mayo-photos-git() {
   pkgdesc='Photos-style image viewer (Mayonnaise)'
   depends=("${_appdeps[@]}")
-  optdepends=("$_dialogs")
+  optdepends=("$_vulkan" "$_dialogs")
   _install_component photos
 }
 
 package_mayo-video-player-git() {
   pkgdesc='Video player with a library gallery and .srt/.vtt subtitles (Mayonnaise)'
   depends=("${_appdeps[@]}" ffmpeg)
-  optdepends=('libva: VAAPI hardware decoding'
+  optdepends=("$_vulkan" 'libva: VAAPI hardware decoding'
               'xdg-utils: "Show in Files"'
               "$_dialogs")
   _install_component video_player
@@ -119,7 +123,7 @@ package_mayo-video-player-git() {
 package_mayo-system-settings-git() {
   pkgdesc='System Settings-style control centre for GNOME (Mayonnaise)'
   depends=("${_appdeps[@]}" glib2 gsettings-desktop-schemas)
-  optdepends=('gnome-shell: Displays, Night Light and most desktop panels'
+  optdepends=("$_vulkan" 'gnome-shell: Displays, Night Light and most desktop panels'
               'gnome-settings-daemon: power, Night Light and media key settings'
               'networkmanager: Wi-Fi and Network panels'
               'bluez: Bluetooth panel'
@@ -138,5 +142,6 @@ package_mayo-system-settings-git() {
 package_mayo-calculator-git() {
   pkgdesc='Calculator-style basic and scientific calculator (Mayonnaise)'
   depends=("${_appdeps[@]}")
+  optdepends=("$_vulkan")
   _install_component calculator
 }

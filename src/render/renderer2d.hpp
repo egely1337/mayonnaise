@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "gl.hpp"
+#include "rhi/rhi.hpp"
 #include "mayonnaise/color.hpp"
 #include "mayonnaise/geometry.hpp"
 #include "mayonnaise/theme.hpp"
@@ -20,9 +20,11 @@ public:
     Renderer2D(const Renderer2D&) = delete;
     Renderer2D& operator=(const Renderer2D&) = delete;
 
-    void beginFrame(int pixelWidth, int pixelHeight, float scale);
-    /// Flushes and copies the scene to the default framebuffer.
+    void beginFrame(platform::PlatformWindow& window, int pixelWidth, int pixelHeight, float scale);
+    /// Submits the queued primitives.
     void endFrame();
+    /// Shows the scene in the window the frame began for (waits for vsync).
+    void present(platform::PlatformWindow& window);
     /// Reads back the scene target as top-down RGBA8 (premultiplied).
     std::vector<std::uint8_t> readPixels(int& width, int& height);
 
@@ -40,13 +42,13 @@ public:
     void triangle(Point a, Point b, Point c, const Color& color, float cornerRadius = 0);
     /// Arc around `center`; angles in radians, 0 = +x, positive sweep is clockwise on screen.
     void arc(Point center, float radius, float startAngle, float sweep, const Color& color, float width);
-    void image(const Rect& r, GLuint texture, const Rect& uv, const CornerRadii& radii, float opacity);
+    void image(const Rect& r, rhi::Texture* texture, const Rect& uv, const CornerRadii& radii, float opacity);
     /// YUV frame: tex[0] = Y, tex[1] = UV (NV12) or U, tex[2] = V (I420) or 0. `matrix`: 0 = BT.601,
     /// 1 = BT.709, 2 = BT.2020.
-    void video(const Rect& r, const GLuint (&tex)[3], bool planar, int matrix, bool fullRange,
+    void video(const Rect& r, rhi::Texture* const (&tex)[3], bool planar, int matrix, bool fullRange,
                const CornerRadii& radii, float opacity);
     /// Glyph quad already in device pixels (text is laid out on the pixel grid).
-    void glyphPx(const Rect& px, GLuint atlas, const Rect& uv, const Color& color, float gamma);
+    void glyphPx(const Rect& px, rhi::Texture* atlas, const Rect& uv, const Color& color, float gamma);
     /// Blurs everything drawn so far and draws it, tinted, inside the shape.
     void backdrop(const Rect& r, const CornerRadii& radii, const MaterialStyle& style);
 
@@ -58,7 +60,7 @@ public:
 
     [[nodiscard]] int drawCallsLastFrame() const { return m_drawCallsLast; }
     /// Submits queued primitives if the current batch samples `texture` (before it is modified).
-    void flushIfUsing(GLuint texture) {
+    void flushIfUsing(const rhi::Texture* texture) {
         if (m_batchTexture == texture) flush();
     }
 
@@ -81,32 +83,25 @@ private:
     };
     enum class Type : int { Fill = 0, Shadow, Image, Glyph, Line, Gradient, Backdrop, Arc, Triangle, Video };
 
-    Instance& push(Type type, float l, float t, float r, float b, GLuint texture);
+    Instance& push(Type type, float l, float t, float r, float b, rhi::Texture* texture);
     bool culled(float l, float t, float r, float b) const;
     void setColor(float* out, const Color& c) const;
     void flush();
-    GLuint blurScene(float radiusPx, const Rect& regionPx);
+    rhi::Texture* blurScene(float radiusPx, const Rect& regionPx);
+    /// (Re)creates a render target when its size changed.
+    void ensureTarget(std::unique_ptr<rhi::Texture>& target, int width, int height);
 
-    gl::Program m_program;
-    gl::Program m_blurDown;
-    gl::Program m_blurUp;
-    gl::VertexArray m_vao;
-    gl::VertexArray m_emptyVao;
-    gl::Buffer m_instanceBuffer;
-    size_t m_streamSize = 0;    // bytes; the instance buffer is used as a ring, see flush()
-    size_t m_streamOffset = 0;
-    gl::Texture m_whiteTexture;
-    GLint m_uViewport = -1;
-    GLint m_uTexture = -1;
-    GLint m_uTexture1 = -1;
-    GLint m_uTexture2 = -1;
-    GLuint m_extraTextures[2] = {0, 0};  // units 1 and 2, only for video batches
+    rhi::Device& m_device;
+    std::unique_ptr<rhi::Pipeline> m_program;
+    std::unique_ptr<rhi::Pipeline> m_blurDown;
+    std::unique_ptr<rhi::Pipeline> m_blurUp;
+    rhi::Texture* m_extraTextures[2] = {nullptr, nullptr};  // bindings 1 and 2, only for video batches
 
-    gl::RenderTarget m_scene;
-    std::vector<gl::RenderTarget> m_blurChain;
+    std::unique_ptr<rhi::Texture> m_scene;
+    std::vector<std::unique_ptr<rhi::Texture>> m_blurChain;
 
     std::vector<Instance> m_instances;
-    GLuint m_batchTexture = 0;
+    rhi::Texture* m_batchTexture = nullptr;
     std::vector<Clip> m_clips;
     std::vector<float> m_opacity;
     int m_width = 0;

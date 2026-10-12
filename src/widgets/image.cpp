@@ -2,17 +2,12 @@
 
 #include <algorithm>
 
-#include "../render/gl.hpp"
 #include "../render/image_io.hpp"
 #include "../render/renderer2d.hpp"
+#include "../render/rhi/rhi.hpp"
 #include "mayonnaise/painter.hpp"
 
 namespace mayo {
-
-namespace render {
-/// False once the GL context is gone, so late ImageData destruction doesn't call into GL.
-bool glContextAlive();
-}  // namespace render
 
 struct ImageData::Impl {
     render::DecodedImage pixels;
@@ -30,54 +25,38 @@ struct ImageData::Impl {
         render::resizeBox(pixels, std::max(1, static_cast<int>(static_cast<float>(pixels.width) * k + 0.5f)),
                           std::max(1, static_cast<int>(static_cast<float>(pixels.height) * k + 0.5f)));
     }
-    GLuint texture = 0;
+    std::unique_ptr<rhi::Texture> texture;  // may be destroyed on any thread; the RHI defers the GPU side
 
-    GLuint textureId() {
+    rhi::Texture* gpuTexture() {
+        rhi::Device* device = rhi::device();
+        if (!device) return nullptr;
         if (texture && dirty && !pixels.pixels.empty()) {
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, pixels.width, pixels.height, GL_RGBA, GL_UNSIGNED_BYTE,
-                            pixels.pixels.data());
+            device->upload(*texture, 0, 0, pixels.width, pixels.height, pixels.pixels.data());
             dirty = false;
-            return texture;
+            return texture.get();
         }
-        if (texture || pixels.pixels.empty()) return texture;
+        if (texture || pixels.pixels.empty()) return texture.get();
         dirty = false;
         // Clamp to what the GPU can sample (rare: > 16k photos).
-        GLint maxSize = 4096;
-        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
+        const int maxSize = device->maxTextureSize();
         if (pixels.width > maxSize || pixels.height > maxSize) {
             float k = static_cast<float>(maxSize) / static_cast<float>(std::max(pixels.width, pixels.height));
             render::resizeBox(pixels, static_cast<int>(static_cast<float>(pixels.width) * k),
                               static_cast<int>(static_cast<float>(pixels.height) * k));
         }
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pixels.width, pixels.height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                     pixels.pixels.data());
-        if (dynamic) {
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        } else {
-            glGenerateMipmap(GL_TEXTURE_2D);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        texture = device->createTexture({.width = pixels.width, .height = pixels.height, .mipmaps = !dynamic});
+        device->upload(*texture, 0, 0, pixels.width, pixels.height, pixels.pixels.data());
         if (!retain) {
             pixels.pixels.clear();
             pixels.pixels.shrink_to_fit();
         }
-        return texture;
+        return texture.get();
     }
 };
 
 ImageData::ImageData() : m_impl(std::make_unique<Impl>()) {}
 
-ImageData::~ImageData() {
-    if (m_impl->texture && render::glContextAlive()) glDeleteTextures(1, &m_impl->texture);
-}
+ImageData::~ImageData() = default;
 
 std::shared_ptr<ImageData> ImageData::load(const std::string& path, int maxDimension) {
     std::shared_ptr<ImageData> img(new ImageData());
@@ -158,7 +137,7 @@ int ImageData::height() const { return m_impl->pixels.height; }
 
 void Painter::drawImage(const Rect& r, const ImageData& image, const CornerRadii& radii, float opacity,
                         const Rect& source) {
-    GLuint tex = image.impl().textureId();
+    rhi::Texture* tex = image.impl().gpuTexture();
     if (!tex) return;
     m_renderer.image(r, tex, source, radii, opacity);
 }

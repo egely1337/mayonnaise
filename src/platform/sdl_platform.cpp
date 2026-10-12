@@ -1,10 +1,12 @@
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <initializer_list>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -18,6 +20,8 @@ namespace mayo::platform {
 namespace {
 
 SDL_GLContext g_context = nullptr;
+GraphicsApi g_api = GraphicsApi::OpenGL;
+bool g_vulkanLoaded = false;
 std::unordered_map<WindowId, PlatformWindow*> g_windows;
 std::array<SDL_Cursor*, 6> g_cursors{};
 CursorShape g_currentCursor = CursorShape::Arrow;
@@ -51,20 +55,42 @@ std::string drmDriver(const std::filesystem::path& card) {
     return ec ? std::string() : target.filename().string();
 }
 
-/// On hybrid laptops glvnd's libEGL loads every installed vendor. When Mesa drives the display, the NVIDIA
-/// EGL stack is pure overhead (~90 MB of mapped libraries, ~6 MB private, and it can wake the dGPU), so
-/// restrict EGL to Mesa for this process. Only on Wayland, where the compositor (not an NVIDIA-primary X
-/// server) owns the display, and only when every connected screen hangs off a non-NVIDIA GPU. PRIME offload
-/// (`prime-run`), explicit glvnd variables and MAYO_EGL_ALL_VENDORS=1 opt out. Returns true if applied.
-bool preferMesaEgl() {
+/// True on hybrid laptops where an NVIDIA driver is installed but Mesa drives every connected screen. Loading
+/// the NVIDIA stack there is pure overhead (~90 MB of mapped libraries, ~6 MB private, and it can wake the dGPU).
+/// Only on Wayland, where the compositor (not an NVIDIA-primary X server) owns the display. PRIME offload
+/// (`prime-run`), explicit loader variables and MAYO_EGL_ALL_VENDORS=1 opt out.
+bool mesaDrivesDisplays(std::initializer_list<const char*> optOuts) {
     namespace fs = std::filesystem;
-    for (const char* var : {"__EGL_VENDOR_LIBRARY_FILENAMES", "__EGL_VENDOR_LIBRARY_DIRS", "__NV_PRIME_RENDER_OFFLOAD",
-                            "MAYO_GLX", "MAYO_EGL_ALL_VENDORS"}) {
+    for (const char* var : {"__NV_PRIME_RENDER_OFFLOAD", "MAYO_EGL_ALL_VENDORS", "DRI_PRIME"}) {
+        if (std::getenv(var)) return false;
+    }
+    for (const char* var : optOuts) {
         if (std::getenv(var)) return false;
     }
     const char* driver = std::getenv("SDL_VIDEO_DRIVER");
     if (!std::getenv("WAYLAND_DISPLAY") || (driver && std::strcmp(driver, "wayland") != 0)) return false;
 
+    // Connected connectors are named card<N>-<port>; the dGPU often has none (or is suspended and absent).
+    std::error_code ec;
+    bool otherConnected = false;
+    for (const auto& entry : fs::directory_iterator("/sys/class/drm", ec)) {
+        const std::string name = entry.path().filename().string();
+        const auto dash = name.find('-');
+        if (name.rfind("card", 0) != 0 || dash == std::string::npos) continue;
+        std::ifstream statusFile(entry.path() / "status");
+        std::string status;
+        if (!(statusFile >> status) || status != "connected") continue;
+        if (drmDriver(entry.path().parent_path() / name.substr(0, dash)) == "nvidia") return false;
+        otherConnected = true;
+    }
+    return otherConnected;
+}
+
+/// Restricts glvnd's libEGL to Mesa for this process when Mesa drives the display (see mesaDrivesDisplays).
+/// Returns true if applied.
+bool preferMesaEgl() {
+    namespace fs = std::filesystem;
+    if (!mesaDrivesDisplays({"__EGL_VENDOR_LIBRARY_FILENAMES", "__EGL_VENDOR_LIBRARY_DIRS", "MAYO_GLX"})) return false;
     std::error_code ec;
     fs::path mesa;
     bool nvidiaVendor = false;
@@ -77,26 +103,13 @@ bool preferMesaEgl() {
     }
     if (!nvidiaVendor || mesa.empty()) return false;
 
-    // Connected connectors are named card<N>-<port>; the dGPU often has none (or is suspended and absent).
-    bool otherConnected = false;
-    for (const auto& entry : fs::directory_iterator("/sys/class/drm", ec)) {
-        const std::string name = entry.path().filename().string();
-        const auto dash = name.find('-');
-        if (name.rfind("card", 0) != 0 || dash == std::string::npos) continue;
-        std::ifstream statusFile(entry.path() / "status");
-        std::string status;
-        if (!(statusFile >> status) || status != "connected") continue;
-        if (drmDriver(entry.path().parent_path() / name.substr(0, dash)) == "nvidia") return false;
-        otherConnected = true;
-    }
-    if (!otherConnected) return false;
-
     setenv("__EGL_VENDOR_LIBRARY_FILENAMES", mesa.c_str(), 1);
     if (const char* v = std::getenv("MAYO_VERBOSE"); v && *v && *v != '0')
         SDL_Log("mayonnaise: Mesa drives the display; EGL restricted to %s", mesa.c_str());
     return true;
 }
 bool g_restrictedEgl = false;
+bool g_restrictedVulkan = false;
 #endif
 
 float envScaleOverride() {
@@ -198,8 +211,9 @@ PlatformWindow::PlatformWindow(const WindowConfig& config) : m_impl(std::make_un
     const char* noTransparency = std::getenv("MAYO_NO_TRANSPARENCY");
     m_transparent = config.transparent && !(noTransparency && *noTransparency && *noTransparency != '0');
 
-    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, m_transparent ? 8 : 0);
-    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    const bool gl = g_api == GraphicsApi::OpenGL;
+    if (gl) SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, m_transparent ? 8 : 0);
+    SDL_WindowFlags flags = (gl ? SDL_WINDOW_OPENGL : SDL_WINDOW_VULKAN) | SDL_WINDOW_HIDDEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (config.resizable) flags |= SDL_WINDOW_RESIZABLE;
     if (m_transparent) flags |= SDL_WINDOW_TRANSPARENT;
 
@@ -207,7 +221,7 @@ PlatformWindow::PlatformWindow(const WindowConfig& config) : m_impl(std::make_un
     if (!m_impl->window && m_transparent) {
         // Some X11 setups have no ARGB visual; fall back to an opaque window.
         m_transparent = false;
-        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
+        if (gl) SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
         flags &= ~SDL_WINDOW_TRANSPARENT;
         m_impl->window = SDL_CreateWindow(config.title.c_str(), config.width, config.height, flags);
     }
@@ -223,6 +237,8 @@ PlatformWindow::PlatformWindow(const WindowConfig& config) : m_impl(std::make_un
                           static_cast<int>(std::lround(config.height / k)));
     }
     setMinimumSize(config.minWidth, config.minHeight);
+    g_windows[id()] = this;
+    if (!gl) return;
 
     if (!g_context) {
         g_context = SDL_GL_CreateContext(m_impl->window);
@@ -246,8 +262,6 @@ PlatformWindow::PlatformWindow(const WindowConfig& config) : m_impl(std::make_un
         SDL_GL_MakeCurrent(m_impl->window, g_context);
     }
     SDL_GL_SetSwapInterval(1);
-
-    g_windows[id()] = this;
 }
 
 PlatformWindow::~PlatformWindow() {
@@ -307,6 +321,19 @@ void PlatformWindow::setMinimumSize(int w, int h) {
     float k = pointsPerWindowUnit();
     SDL_SetWindowMinimumSize(m_impl->window, static_cast<int>(static_cast<float>(w) / k),
                              static_cast<int>(static_cast<float>(h) / k));
+}
+
+bool PlatformWindow::isVisible() const {
+    return (SDL_GetWindowFlags(m_impl->window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0;
+}
+
+std::uint64_t PlatformWindow::createVulkanSurface(void* instance) {
+    VkSurfaceKHR surface = 0;
+    if (!SDL_Vulkan_CreateSurface(m_impl->window, static_cast<VkInstance>(instance), nullptr, &surface)) {
+        SDL_Log("mayonnaise: SDL_Vulkan_CreateSurface failed: %s", SDL_GetError());
+        return 0;
+    }
+    return reinterpret_cast<std::uint64_t>(surface);
 }
 
 void PlatformWindow::makeCurrent() { SDL_GL_MakeCurrent(m_impl->window, g_context); }
@@ -385,6 +412,10 @@ void Platform::shutdown() {
     if (g_context) {
         SDL_GL_DestroyContext(g_context);
         g_context = nullptr;
+    }
+    if (g_vulkanLoaded) {
+        SDL_Vulkan_UnloadLibrary();
+        g_vulkanLoaded = false;
     }
     SDL_Quit();
 }
@@ -627,6 +658,68 @@ std::optional<Appearance> Platform::systemAppearance() {
         case SDL_SYSTEM_THEME_LIGHT: return Appearance::Light;
         default: return std::nullopt;
     }
+}
+
+void Platform::setGraphicsApi(GraphicsApi api) {
+    g_api = api;
+#ifdef __linux__
+    // No GL context will be created to consume the EGL restriction; don't pass it on to launched programs.
+    if (api == GraphicsApi::Vulkan && g_restrictedEgl) {
+        unsetenv("__EGL_VENDOR_LIBRARY_FILENAMES");
+        g_restrictedEgl = false;
+    }
+#endif
+}
+
+GraphicsApi Platform::graphicsApi() { return g_api; }
+
+bool Platform::loadVulkan() {
+    if (!g_vulkanLoaded) g_vulkanLoaded = SDL_Vulkan_LoadLibrary(nullptr);
+    return g_vulkanLoaded;
+}
+
+void* Platform::vulkanGetInstanceProcAddr() { return reinterpret_cast<void*>(SDL_Vulkan_GetVkGetInstanceProcAddr()); }
+
+std::vector<const char*> Platform::vulkanInstanceExtensions() {
+    Uint32 count = 0;
+    const char* const* names = SDL_Vulkan_GetInstanceExtensions(&count);
+    if (!names) return {};
+    return {names, names + count};
+}
+
+bool Platform::vulkanPresentationSupport(void* instance, void* physicalDevice, std::uint32_t queueFamily) {
+    return SDL_Vulkan_GetPresentationSupport(static_cast<VkInstance>(instance),
+                                             static_cast<VkPhysicalDevice>(physicalDevice), queueFamily);
+}
+
+void Platform::restrictVulkanDrivers() {
+#ifdef __linux__
+    namespace fs = std::filesystem;
+    if (g_restrictedVulkan ||
+        !mesaDrivesDisplays({"VK_DRIVER_FILES", "VK_ICD_FILENAMES", "VK_LOADER_DRIVERS_SELECT",
+                             "VK_LOADER_DRIVERS_DISABLE", "MESA_VK_DEVICE_SELECT"}))
+        return;
+    std::error_code ec;
+    bool nvidia = false;
+    for (const char* dir : {"/etc/vulkan/icd.d", "/usr/share/vulkan/icd.d"}) {
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            if (entry.path().filename().string().find("nvidia") != std::string::npos) nvidia = true;
+        }
+    }
+    if (!nvidia) return;
+    setenv("VK_LOADER_DRIVERS_DISABLE", "*nvidia*", 1);
+    g_restrictedVulkan = true;
+    if (const char* v = std::getenv("MAYO_VERBOSE"); v && *v && *v != '0')
+        SDL_Log("mayonnaise: Mesa drives the display; NVIDIA Vulkan driver hidden");
+#endif
+}
+
+void Platform::endVulkanDriverRestriction() {
+#ifdef __linux__
+    if (!g_restrictedVulkan) return;
+    unsetenv("VK_LOADER_DRIVERS_DISABLE");
+    g_restrictedVulkan = false;
+#endif
 }
 
 void* Platform::eglDisplay() { return SDL_EGL_GetCurrentDisplay(); }

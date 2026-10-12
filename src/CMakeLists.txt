@@ -14,6 +14,8 @@ add_library(mayonnaise
   platform/sdl_platform.cpp
   platform/wayland_drag.cpp
   render/gl.cpp
+  render/rhi/gl_device.cpp
+  render/rhi/rhi.cpp
   render/font.cpp
   render/font_api.cpp
   render/image_io.cpp
@@ -72,3 +74,18 @@ mayonnaise_embed(mayonnaise
   ${PROJECT_SOURCE_DIR}/shaders/blur_up.frag
   ${PROJECT_SOURCE_DIR}/assets/fonts/InterVariable.ttf
 )
+
+if(MAYONNAISE_VULKAN)
+  target_sources(mayonnaise PRIVATE
+    render/rhi/vk_allocator.cpp
+    render/rhi/vk_device.cpp
+    render/rhi/vk_dmabuf.cpp)
+  target_include_directories(mayonnaise SYSTEM PRIVATE ${MAYONNAISE_VULKAN_INCLUDE_DIR})
+  target_compile_definitions(mayonnaise PRIVATE MAYONNAISE_HAS_VULKAN=1)
+  mayonnaise_embed_spirv(mayonnaise
+    ${PROJECT_SOURCE_DIR}/shaders/ui.vert
+    ${PROJECT_SOURCE_DIR}/shaders/ui.frag
+    ${PROJECT_SOURCE_DIR}/shaders/fullscreen.vert
+    ${PROJECT_SOURCE_DIR}/shaders/blur_down.frag
+    ${PROJECT_SOURCE_DIR}/shaders/blur_up.frag)
+endif()

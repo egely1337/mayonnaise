@@ -19,6 +19,8 @@ namespace mayo::platform {
 
 using WindowId = std::uint32_t;
 
+enum class GraphicsApi : std::uint8_t { OpenGL, Vulkan };
+
 enum class HitRegion : std::uint8_t {
     Normal, Draggable,
     ResizeTop, ResizeBottom, ResizeLeft, ResizeRight,
@@ -96,8 +98,14 @@ public:
     void setMinimumSize(int w, int h);
     void setSize(int w, int h);  // points
 
+    /// Visible on screen (not hidden, not minimized): presenting to a hidden Wayland surface is an error.
+    [[nodiscard]] bool isVisible() const;
+
+    // OpenGL windows.
     void makeCurrent();
     void swapBuffers();
+    // Vulkan windows: a VkSurfaceKHR for `instance` (VkInstance), or 0 on failure. The caller destroys it.
+    [[nodiscard]] std::uint64_t createVulkanSurface(void* instance);
 
     void setHitTest(std::function<HitRegion(Point)> callback);
     void setTextInputActive(bool active, Rect caretRect = {});
@@ -145,6 +153,22 @@ public:
     /// the user cancelled.
     static void showOpenDialog(PlatformWindow* parent, const std::vector<DialogFilter>& filters, bool folders,
                                bool multiple, std::function<void(std::vector<std::string>)> done);
+    /// Which API windows are created for; set before the first window. OpenGL by default.
+    static void setGraphicsApi(GraphicsApi api);
+    [[nodiscard]] static GraphicsApi graphicsApi();
+    /// Loads libvulkan through SDL. False when there is none.
+    static bool loadVulkan();
+    /// PFN_vkGetInstanceProcAddr, once loadVulkan() succeeded.
+    static void* vulkanGetInstanceProcAddr();
+    /// Instance extensions windows need for surfaces.
+    static std::vector<const char*> vulkanInstanceExtensions();
+    static bool vulkanPresentationSupport(void* instance, void* physicalDevice, std::uint32_t queueFamily);
+    /// While Mesa drives every screen, hides the NVIDIA Vulkan driver from the loader for this process (the
+    /// same reasoning as the EGL vendor restriction). Undo it once the physical devices are enumerated, so
+    /// programs we launch don't inherit it.
+    static void restrictVulkanDrivers();
+    static void endVulkanDriverRestriction();
+
     /// EGL display of the shared GL context, or nullptr when the context isn't EGL (GLX).
     static void* eglDisplay();
     static void* eglProcAddress(const char* name);

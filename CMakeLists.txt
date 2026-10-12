@@ -10,6 +10,7 @@ if(DEFINED MAYONNAISE_BUILD_EXAMPLES)
 endif()
 option(MAYONNAISE_BUILD_TESTS "Build Mayonnaise tests" ${MAYONNAISE_IS_TOP_LEVEL})
 option(MAYONNAISE_USE_SYSTEM_DEPS "Require system packages for SDL3/FreeType/doctest instead of fetching" OFF)
+option(MAYONNAISE_VULKAN "Build the Vulkan renderer backend (used when the GPU supports it, else OpenGL)" ON)
 option(MAYONNAISE_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)

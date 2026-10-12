@@ -8,16 +8,11 @@
 #include <malloc.h>
 #endif
 
-#include "../render/gl.hpp"
 #include "../render/image_io.hpp"
 #include "app_impl.hpp"
 #include "window_impl.hpp"
 
 namespace mayo {
-
-namespace render {
-void setGLContextAlive(bool alive);
-}
 
 namespace {
 App* g_app = nullptr;
@@ -215,10 +210,13 @@ App::App(std::string name, std::string desktopId) : m_impl(std::make_unique<Impl
 
 App::~App() {
     m_impl->settings->save();
-    // Shared GL objects go while a window still has the context current: once the last window is
+    // Shared GPU objects go while a window still has the context current: once the last window is
     // destroyed, glDelete* can jump into an unloaded driver (crashed with Arch's -O3 package flags).
+    // Vulkan's device also owns the window surfaces, which must go before their windows.
     m_impl->text.reset();
     m_impl->renderer.reset();
+    m_impl->device.reset();
+    rhi::setDevice(nullptr);
     m_impl->windows.clear();
 
     platform::Platform::shutdown();
@@ -251,12 +249,27 @@ Window& App::createWindow(const WindowOptions& options) {
         config.height = std::clamp(s.getInt(key + "height", options.height), options.minHeight, 16384);
         maximized = s.getBool(key + "maximized");
     }
+    // Windows are created for one graphics API, so the renderer backend is chosen before the first one:
+    // Vulkan when it suits, else OpenGL (whose device needs the first window's context).
+    if (!m_impl->device) {
+        m_impl->device = rhi::createVulkanDevice();
+        platform::Platform::setGraphicsApi(m_impl->device ? platform::GraphicsApi::Vulkan
+                                                          : platform::GraphicsApi::OpenGL);
+    }
     auto impl = std::make_unique<Window::Impl>(config);
     impl->autosaveName = options.autosaveName;
     impl->restoreMaximized = maximized;
-    if (m_impl->windows.empty() && !gl::load()) {
-        std::fprintf(stderr, "mayonnaise: failed to load OpenGL 3.3 functions\n");
-        std::abort();
+    if (!m_impl->device) {
+        m_impl->device = rhi::createGLDevice();
+        if (!m_impl->device) {
+            std::fprintf(stderr, "mayonnaise: failed to load OpenGL 3.3 functions\n");
+            std::abort();
+        }
+    }
+    if (rhi::device() != m_impl->device.get()) {
+        rhi::setDevice(m_impl->device.get());
+        if (const char* v = std::getenv("MAYO_VERBOSE"); v && *v && *v != '0')
+            std::fprintf(stderr, "mayonnaise: rendering with %s\n", m_impl->device->description().c_str());
     }
     if (!m_impl->renderer) {
         m_impl->renderer = std::make_unique<render::Renderer2D>();

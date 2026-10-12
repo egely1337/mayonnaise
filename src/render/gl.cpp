@@ -6,14 +6,6 @@
 
 #include "../platform/platform.hpp"
 
-namespace mayo::render {
-namespace {
-bool g_contextAlive = false;
-}
-bool glContextAlive() { return g_contextAlive; }
-void setGLContextAlive(bool alive) { g_contextAlive = alive; }
-}  // namespace mayo::render
-
 namespace mayo::gl {
 
 namespace {
@@ -50,7 +42,6 @@ GLuint compile(GLenum stage, std::string_view source, std::string_view name) {
 bool load() {
     int version = gladLoadGL(reinterpret_cast<GLADloadfunc>(&platform::Platform::glProcAddress));
     if (!version) return false;
-    render::setGLContextAlive(true);
     bool debugOutput = false;
 #ifndef NDEBUG
     if (GLAD_GL_KHR_debug) {
@@ -107,26 +98,6 @@ Program makeProgram(std::string_view vertexSource, std::string_view fragmentSour
         std::abort();
     }
     return Program(program);
-}
-
-bool RenderTarget::ensure(int w, int h, GLenum filter) {
-    w = w < 1 ? 1 : w;
-    h = h < 1 ? 1 : h;
-    if (fbo && w == width && h == height) return false;
-    if (!fbo) fbo = makeFramebuffer();
-    if (!texture) texture = makeTexture();
-    width = w;
-    height = h;
-    glBindTexture(GL_TEXTURE_2D, texture.id());
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLint>(filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLint>(filter));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo.id());
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture.id(), 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    return true;
 }
 
 }  // namespace mayo::gl

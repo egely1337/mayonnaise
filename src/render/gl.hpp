@@ -62,15 +62,4 @@ Framebuffer makeFramebuffer();
 /// failure is a bug, not a runtime condition).
 Program makeProgram(std::string_view vertexSource, std::string_view fragmentSource, std::string_view name);
 
-/// A color render target with its texture.
-struct RenderTarget {
-    Framebuffer fbo;
-    Texture texture;
-    int width = 0;
-    int height = 0;
-
-    /// (Re)allocates when the size changed. Returns true if storage was reallocated.
-    bool ensure(int w, int h, GLenum filter = GL_LINEAR);
-};
-
 }  // namespace mayo::gl

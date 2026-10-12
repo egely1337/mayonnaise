@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include "font.hpp"
-#include "gl.hpp"
+#include "rhi/rhi.hpp"
 #include "mayonnaise/color.hpp"
 #include "mayonnaise/geometry.hpp"
 
@@ -32,7 +32,7 @@ private:
     bool allocate(int w, int h, int& x, int& y);
     void reset(int size);
 
-    gl::Texture m_atlas;
+    std::unique_ptr<rhi::Texture> m_atlas;
     int m_size = 0;
     int m_shelfX = 0;
     int m_shelfY = 0;

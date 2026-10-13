@@ -208,6 +208,21 @@ def calculator():
     return icon(defs, body, "url(#bg)")
 
 
+def music():
+    defs = grad("bg", (0, "#FF6A88"), (0.55, "#F2365C"), (1, "#C01E5A"), x2=0.4, y2=1)
+    defs += grad("note", (0, "#FFFFFF"), (1, "#FFE3EA"))
+    # Two beamed notes, heads tilted like engraved music.
+    head = lambda cx, cy: f'<ellipse cx="{cx}" cy="{cy}" rx="78" ry="58" transform="rotate(-22 {cx} {cy})" fill="url(#note)"/>'
+    body = f"""      <g filter="url(#soft)">
+        <path d="M418,312 L742,236 L742,322 L418,398 Z" fill="url(#note)"/>
+        <rect x="402" y="330" width="34" height="370" rx="12" fill="url(#note)"/>
+        <rect x="726" y="254" width="34" height="370" rx="12" fill="url(#note)"/>
+        {head(354, 708)}
+        {head(678, 632)}
+      </g>"""
+    return icon(defs, body, "url(#bg)")
+
+
 ICONS = {
     "finder": ("Finder", finder),
     "terminal": ("Terminal", terminal),
@@ -216,6 +231,7 @@ ICONS = {
     "video_player": ("VideoPlayer", videoplayer),
     "system_settings": ("Settings", settings),
     "calculator": ("Calculator", calculator),
+    "music": ("Music", music),
 }
 
 for folder, (name, fn) in ICONS.items():

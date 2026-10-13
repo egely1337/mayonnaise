@@ -481,6 +481,24 @@ void Painter::drawIcon(Icon icon, const Rect& r, const Color& color, float weigh
             pen.line(6.5f, 2.2f, 13.5f, 2.2f);
             pen.p.fillTriangle(pen.at(8.5f, 9.3f), pen.at(12.6f, 11.75f), pen.at(8.5f, 14.2f), color, 0.6f * u);
             break;
+        case Icon::Shuffle:
+            pen.poly({{3, 6}, {6.5f, 6}, {12.5f, 14}, {16, 14}});
+            pen.poly({{13.5f, 11.5f}, {16, 14}, {13.5f, 16.5f}});
+            pen.poly({{3, 14}, {6.5f, 14}, {12.5f, 6}, {16, 6}});
+            pen.poly({{13.5f, 3.5f}, {16, 6}, {13.5f, 8.5f}});
+            break;
+        case Icon::RepeatOne:
+            pen.poly({{4, 9}, {4, 6}, {15, 6}});
+            pen.poly({{12.5f, 3.5f}, {15, 6}, {12.5f, 8.5f}});
+            pen.poly({{16, 11}, {16, 14}, {5, 14}});
+            pen.poly({{7.5f, 11.5f}, {5, 14}, {7.5f, 16.5f}});
+            pen.poly({{8.9f, 9.1f}, {10.2f, 8.2f}, {10.2f, 11.8f}});
+            break;
+        case Icon::Album:
+            pen.rrect(2.5f, 2.5f, 15, 15, 2.5f);
+            pen.circle(10, 10, 4.3f);
+            pen.dot(10, 10, 1.1f);
+            break;
     }
 }
 

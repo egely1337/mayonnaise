@@ -95,6 +95,23 @@ frames, so typing and scrolling stay responsive.
 
 ![Terminal](docs/screenshots/terminal.png)
 
+### Music example
+
+`applications/music` is a Music-style player: Recently Added, Artists, Albums, Songs (sortable columns) and
+Favorite Songs, album pages with cover art (embedded pictures or cover.jpg & co. in the album folder), search,
+Play Next / Add to Queue, shuffle and repeat, and a now-playing display in the toolbar you can scrub. Tags are
+read with FFmpeg and cached, so the library appears instantly on the next start; playback decodes on its own
+thread. With GIO it publishes MPRIS, so media keys, the desktop's media controls and `playerctl` work.
+
+```sh
+./build/applications/music/music                 # the library (~/Music plus folders added in Settings)
+./build/applications/music/music song.flac album/ # play files or folders right away
+```
+
+![Music](docs/screenshots/music.png)
+
+![Music, albums](docs/screenshots/music-albums.png)
+
 ### Calculator example
 
 `applications/calculator` is a Calculator-style calculator: a basic keypad and a scientific one (Ctrl+1 / Ctrl+2
@@ -142,9 +159,17 @@ the freedesktop.org Trash, so items trashed here show up in other file managers 
 
 ### System Settings
 
-`applications/system_settings` is a System Settings-style control centre for GNOME on GNU/Linux. It changes the
-real desktop: every panel reads and writes the same GSettings keys and D-Bus services as GNOME Settings and
-follows changes made elsewhere while it's open.
+`applications/system_settings` is a System Settings-style control centre for GNOME and KDE Plasma on GNU/Linux.
+It changes the real desktop: every panel reads and writes the same GSettings keys and D-Bus services as GNOME
+Settings and follows changes made elsewhere while it's open.
+
+Under Plasma (detected from `XDG_CURRENT_DESKTOP`, or forced with `SETTINGS_DESKTOP=kde`) the desktop-specific
+panels switch to KDE's own storage and services: KConfig files (`kdeglobals`, `kwinrc`, `kcminputrc`, `kxkbrc`,
+`powerdevilrc`, `kscreenlockerrc`, `plasmanotifyrc`, ...) written the way KConfig does, with the
+`org.kde.kconfig.notify` signal so Plasma applies them live; KScreen (`kscreen-doctor`) for displays; KWin's
+D-Bus input devices for mice and touchpads and its virtual desktop manager; PowerDevil for power; and
+`plasma-apply-colorscheme` / `-wallpaperimage` / `-cursortheme` / `-lookandfeel` for appearance. Network,
+Bluetooth, Sound, battery, users, region, date & time and About are shared. Wellbeing is GNOME-only.
 
 - **Wi-Fi / Network / Bluetooth** — NetworkManager (join, password prompt, hidden networks, forget,
   auto-join, details, airplane mode, wired, VPN import, proxy) and BlueZ (power, pair, connect, forget,
@@ -180,7 +205,7 @@ failing.
 
 `packaging/arch/PKGBUILD` builds a split package from the committed tree: `mayonnaise-git` (static library,
 headers, CMake package) and one package per app, plus `mayo-apps-git` for all of them. Apps install to
-`/usr/bin` as `finder`, `terminal`, `taskmanager`, `photos`, `video_player`, `systemsettings` and `calculator`, each with a
+`/usr/bin` as `finder`, `terminal`, `taskmanager`, `photos`, `video_player`, `systemsettings`, `calculator` and `music`, each with a
 desktop entry and a macOS-style icon:
 
 ![App icons](docs/screenshots/app-icons.png)

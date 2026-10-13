@@ -30,6 +30,7 @@ LSAN_OPTIONS=suppressions=$PWD/tools/lsan.supp MAYO_SCREENSHOT=/tmp/x.png ./buil
 ./build/applications/terminal/terminal [directory]                # Linux only
 ./build/applications/system_settings/systemsettings [panel]       # Linux + GIO; changes the real desktop!
 ./build/applications/calculator/calculator
+./build/applications/music/music [files or folders...]            # needs FFmpeg dev libs; GIO adds MPRIS
 
 # Arch packages (split: library + one package per app, plus mayo-apps-git)
 cd packaging/arch && makepkg -si   # builds whatever is committed
@@ -49,8 +50,10 @@ Useful environment variables:
   scratch folder, and it never launches other programs in demo mode.
   Terminal: `MAYO_DEMO=<command>` types a command, `MAYO_DEMO_SCROLL=<points>` then swipes into the history.
   Calculator: `MAYO_DEMO=scientific|settings|<keys>` (keys are typed: `MAYO_DEMO='12+3*4='`).
+  Music: comma-separated `recent|artists|albums|songs|favorites`, `album:<n>`, `play:<n>`, `search:<text>`, `queue`,
+  `settings`, `pause`, `seek:<s>`, `favorite` (set `XDG_CACHE_HOME` too: scans write the tag cache).
   System settings: `MAYO_DEMO=<panel>[:action]` (actions: `wifi:other`, `displays:keep`, `appearance:fonts`,
-  `keyboard:add`, `keyboard:shortcut`, `datetime:zones`); screenshot runs and `SETTINGS_READ_ONLY=1` never write
+  `keyboard:add`, `keyboard:shortcut`, `datetime:zones`); `SETTINGS_DESKTOP=kde|gnome` overrides the detected desktop; screenshot runs and `SETTINGS_READ_ONLY=1` never write
   GSettings, D-Bus or nmcli/pactl state (Mutter is only asked to *verify* display configs).
 - `MAYO_VERBOSE=2` — also print frames per second and CPU ms per frame (find widgets that never stop requesting
   frames, or slow draws).
@@ -88,11 +91,11 @@ src/theme/            light/dark themes, type scale
 shaders/              GLSL, embedded at build time (cmake/Embed.cmake -> generated .cpp)
 assets/fonts/         InterVariable.ttf (OFL) + license, embedded at build time
 third_party/          vendored glad (generated GL 3.3 core + KHR_debug) and stb single headers
-applications/         finder, terminal, task_manager, photos, video_player, system_settings, calculator; each has data/
+applications/         finder, terminal, task_manager, photos, video_player, system_settings, calculator, music; each has data/
                       (.desktop + icon) and is its own CMake install component
 packaging/arch/       split PKGBUILD
 tests/                doctest unit tests (geometry, color, theme, layout, event dispatch, scroll physics,
-                      terminal screen, calculator engine)
+                      terminal screen, calculator engine, KConfig reader/writer)
 ```
 
 Frame flow: `App::run` blocks in `SDL_WaitEventTimeout` until an event or the next animation /
@@ -161,6 +164,10 @@ Known issues / next steps:
   rearrange (side-by-side packing only); the shortcut recorder can't capture keys the compositor grabs
   (Super+arrows) because SDL doesn't expose the keyboard-shortcuts-inhibit protocol; passwords are changed
   with `passwd`, not in the app. Clicking through the panels was only verified via MAYO_DEMO screenshots.
+  On KDE Plasma: global shortcuts open Plasma's own editor (kcm_keys); the KDE panels have not been run on a real
+  Plasma session yet (only `SETTINGS_DESKTOP=kde` on GNOME), so key names/defaults may need adjusting there.
+- Music example: no gapless playback, ReplayGain or user playlists (only Favorite Songs); covers cached per album
+  are not refreshed when the embedded picture changes (delete `~/.cache/mayonnaise/music/covers`).
 
 ## Decisions
 
@@ -243,6 +250,26 @@ Known issues / next steps:
 - **Touchpad gestures are latched** by the dispatcher: every event of a gesture goes to the widget that took the
   first one (until the fingers lift, or a 0.25 s pause without end events), so content moving under the pointer
   or reaching an edge never hands half a swipe to another scroller.
+- **System Settings on KDE Plasma**: `gx::Key` can be backed by a `KeyBackend` (text values + a declared type), so
+  the same `ui::` rows bind to KConfig entries (`kcfg::key`, `flagKey`, `multiKey`, `appliedKey` in kconfig.hpp).
+  `kcfg::write` edits the user's file in place (keeps comments and unknown entries, `[A][B]` nested groups,
+  KConfig escapes), emits `org.kde.kconfig.notify.ConfigChanged` (nested group names joined by `\x1d`) and pokes
+  services that don't watch their files (`Reload`: KWin reconfigure, kxkb reloadConfig, PowerDevil refreshStatus,
+  screensaver configure, KGlobalSettings notifyChange). Files are watched with GFileMonitor. Writes that need
+  Plasma's tools (colour schemes, wallpapers, cursors, icons, global themes) go through `appliedKey`. Displays
+  reuse the Mutter panel with a KScreen backend (`kscreen-doctor -j` / `output.<name>.mode.<id> ...`; KScreen
+  stores changes itself, the keep prompt reverts by re-applying). Pointer settings are KWin InputDevice D-Bus
+  properties (KWin persists them). The KDE panels live in panels_kde.cpp; shared helpers in panels_shared.hpp.
+  Only the KConfig layer is tested (tests/test_kconfig.cpp); the Plasma services were not available on the dev
+  machine (GNOME), so the KDE panels were verified with `SETTINGS_DESKTOP=kde` screenshots and a fake
+  `kscreen-doctor`.
+- **Music example** (applications/music): `AudioPlayer` (player.cpp) is one FFmpeg decode thread feeding
+  `mayo::AudioOutput` ~0.4 s ahead, position = last sample time − queued; accurate seeks drop samples before the
+  target. The library (library.cpp) caches tags in `$XDG_CACHE_HOME/mayonnaise/music/library.tsv` and embedded
+  covers in `covers/` (the attached picture bytes as they are, also used as MPRIS artUrl). Albums are grouped by
+  album artist, or by folder when there is none (compilations stay together). Covers load lazily on one worker
+  when first drawn. Progress/end-of-track checks run on a 0.25 s `App::after` timer only while playing. MPRIS
+  (mpris.cpp, only with GIO) runs GDBus on its own GMainContext thread; calls hop to the UI with `App::post`.
 - **Calculator example** (applications/calculator): `Engine` is UI-free and tested (tests/test_calculator_engine.cpp):
   it keeps the whole expression and evaluates with shunting-yard; after an operator the display shows only
   what that operator settles (2 + 3 × shows 3). Separators come from the C++ locale (`numpunct`). The view is one
@@ -349,8 +376,10 @@ Known issues / next steps:
 - **Backdrop materials ignore the colour opacity stack by construction** (they output the blurred scene), so
   group opacity is passed separately (`clip2.y`) — otherwise fading popovers pop in at full opacity.
 - **Dragging files out (Wayland)**: SDL3 can't start a drag, so `src/platform/wayland_drag.cpp` dlopen()s
-  libwayland-client and puts its own wl_seat / wl_pointer / wl_data_device on SDL's wl_display, on a separate
-  event queue dispatched after every SDL pump. The extra wl_pointer only exists to learn the serial of the button
+  libwayland-client and puts its own wl_seat / wl_pointer on SDL's wl_display, on a separate event queue
+  dispatched after every SDL pump. Its wl_data_device exists only during a drag: Mutter sends the clipboard
+  selection (and drops) to just one data device per client, so a permanent second one starved SDL's — pasting
+  from other apps silently returned "" (own copies still worked, SDL short-circuits them). The extra wl_pointer only exists to learn the serial of the button
   press, which `start_drag` requires. Widgets call `host()->startFileDrag(paths)` while the button is down (Finder
   does it when the pointer leaves the window); the compositor keeps the release, so a DragEnded platform event
   makes the dispatcher send the captured widget an onPointerUp far outside the window. Not available on X11.

@@ -1,0 +1,17 @@
+# Needs FFmpeg's development libraries (libavformat/libavcodec/libswresample); GIO adds MPRIS (media keys).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(MAYO_MUSIC_FFMPEG IMPORTED_TARGET libavformat libavcodec libswresample libavutil)
+  pkg_check_modules(MAYO_MUSIC_GIO IMPORTED_TARGET gio-2.0)
+endif()
+if(NOT MAYO_MUSIC_FFMPEG_FOUND)
+  message(STATUS "Mayonnaise: FFmpeg not found, skipping the music player")
+  return()
+endif()
+mayonnaise_app(music ID io.github.egely1337.Mayonnaise.Music
+  SOURCES main.cpp player.cpp library.cpp views.cpp mpris.cpp)
+target_link_libraries(music PRIVATE PkgConfig::MAYO_MUSIC_FFMPEG)
+if(MAYO_MUSIC_GIO_FOUND)
+  target_link_libraries(music PRIVATE PkgConfig::MAYO_MUSIC_GIO)
+  target_compile_definitions(music PRIVATE MAYO_MUSIC_MPRIS)
+endif()

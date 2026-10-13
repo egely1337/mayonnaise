@@ -91,6 +91,7 @@ constexpr std::uint32_t kSourceOffer = 0;
 constexpr std::uint32_t kSourceDestroy = 1;
 constexpr std::uint32_t kSourceSetActions = 2;
 constexpr std::uint32_t kDeviceStartDrag = 0;
+constexpr std::uint32_t kDeviceRelease = 2;  // since wl_data_device v2
 constexpr std::uint32_t kOfferDestroy = 2;
 constexpr std::uint32_t kMarshalDestroy = 1;  // WL_MARSHAL_FLAG_DESTROY
 constexpr std::uint32_t kActionCopy = 1;
@@ -139,6 +140,13 @@ std::string percentEncode(const std::string& path) {
     return out;
 }
 
+void releaseDevice() {
+    // A v1 device can't be released; keep it then (only very old compositors).
+    if (!g.device || lib().getVersion(g.device) < 2) return;
+    lib().marshal(g.device, kDeviceRelease, nullptr, lib().getVersion(g.device), kMarshalDestroy);
+    g.device = nullptr;
+}
+
 void finishDrag(bool destroySource) {
     if (g.ended) {
         auto fn = std::move(g.ended);
@@ -148,6 +156,7 @@ void finishDrag(bool destroySource) {
     if (destroySource && g.source) {
         lib().marshal(g.source, kSourceDestroy, nullptr, lib().getVersion(g.source), kMarshalDestroy);
         g.source = nullptr;
+        releaseDevice();
         lib().flush(g.display);
     }
 }
@@ -248,7 +257,7 @@ void (*kSourceListener[])(void) = {
 
 bool init(void* display) {
     if (g.failed) return false;
-    if (g.queue) return g.device != nullptr;
+    if (g.queue) return g.manager != nullptr;
     if (!display || !lib().ok) {
         g.failed = true;
         return false;
@@ -268,8 +277,9 @@ bool init(void* display) {
     }
     lib().addListener(g.seat, kSeatListener, nullptr);
     lib().roundtripQueue(g.display, g.queue);  // seat capabilities -> pointer
-    g.device = lib().marshal(g.manager, kManagerGetDevice, lib().deviceIface, lib().getVersion(g.manager), 0, nullptr, g.seat);
-    lib().addListener(g.device, kDeviceListener, nullptr);
+    // No wl_data_device yet: Mutter sends the clipboard selection and drops to only one data device per
+    // client, so a second one here would starve SDL's (paste from other apps and drops stopped working).
+    // startFileDrag() creates it for the length of a drag.
     lib().flush(g.display);
     if (std::getenv("MAYO_VERBOSE"))
         std::fprintf(stderr, "mayonnaise: Wayland file drags ready (pointer %s)\n", g.pointer ? "yes" : "no");
@@ -293,6 +303,10 @@ bool startFileDrag(void* display, void* surface, const std::vector<std::string>&
         g.plain += (g.plain.empty() ? "" : "\n") + p;
     }
     g.ended = std::move(ended);
+    if (!g.device) {
+        g.device = lib().marshal(g.manager, kManagerGetDevice, lib().deviceIface, lib().getVersion(g.manager), 0, nullptr, g.seat);
+        lib().addListener(g.device, kDeviceListener, nullptr);
+    }
     g.source = create(g.manager, kManagerCreateSource, lib().sourceIface);
     lib().addListener(g.source, kSourceListener, nullptr);
     for (const char* mime : {"text/uri-list", "text/plain;charset=utf-8", "text/plain", "UTF8_STRING"})

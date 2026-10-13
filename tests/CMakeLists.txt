@@ -18,4 +18,16 @@ endif()
 # So is the calculator's arithmetic.
 target_sources(mayonnaise_tests PRIVATE test_calculator_engine.cpp ${PROJECT_SOURCE_DIR}/applications/calculator/engine.cpp)
 target_include_directories(mayonnaise_tests PRIVATE ${PROJECT_SOURCE_DIR}/applications/calculator)
+# The System Settings example's KConfig reader/writer (KDE support) needs GIO, like the app.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  pkg_check_modules(MAYO_TEST_GIO IMPORTED_TARGET gio-2.0 gio-unix-2.0)
+  if(MAYO_TEST_GIO_FOUND)
+    set(SETTINGS_DIR ${PROJECT_SOURCE_DIR}/applications/system_settings)
+    target_sources(mayonnaise_tests PRIVATE test_kconfig.cpp ${SETTINGS_DIR}/kconfig.cpp ${SETTINGS_DIR}/glib_support.cpp
+                   ${SETTINGS_DIR}/ui.cpp)
+    target_include_directories(mayonnaise_tests PRIVATE ${SETTINGS_DIR})
+    target_link_libraries(mayonnaise_tests PRIVATE PkgConfig::MAYO_TEST_GIO)
+  endif()
+endif()
 add_test(NAME mayonnaise_tests COMMAND mayonnaise_tests)

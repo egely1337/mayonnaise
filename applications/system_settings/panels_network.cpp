@@ -8,6 +8,7 @@
 #include <set>
 
 #include "glib_support.hpp"
+#include "kconfig.hpp"
 #include "panels.hpp"
 #include "ui.hpp"
 
@@ -661,6 +662,7 @@ private:
     }
 
     Element proxySection() {
+        if (desk::kde()) return kde::proxySection();
         constexpr const char* kProxy = "org.gnome.system.proxy";
         gx::Key mode(kProxy, "mode");
         if (!mode) return Element();
@@ -837,7 +839,15 @@ private:
         if (m_adapter.empty()) return;
         gx::setProperty(gx::systemBus(), kBluez, m_adapter.c_str(), "org.bluez.Adapter1", "Powered", g_variant_new_boolean(on),
                         [this, on](gx::Variant, const std::string& error) {
-                            if (error.find("Blocked") != std::string::npos || error.find("rfkill") != std::string::npos) {
+                            if ((error.find("Blocked") != std::string::npos || error.find("rfkill") != std::string::npos) &&
+                                !gx::hasName(gx::sessionBus(), "org.gnome.SettingsDaemon.Rfkill")) {
+                                // No GNOME daemon (Plasma): lift the soft block with rfkill(8), which the active
+                                // session may use, then retry.
+                                gx::run({"rfkill", on ? "unblock" : "block", "bluetooth"}, [this, on](const gx::ProcessResult&) {
+                                    gx::setProperty(gx::systemBus(), kBluez, m_adapter.c_str(), "org.bluez.Adapter1", "Powered",
+                                                    g_variant_new_boolean(on));
+                                });
+                            } else if (error.find("Blocked") != std::string::npos || error.find("rfkill") != std::string::npos) {
                                 // Soft-blocked by rfkill: lift the block through gnome-settings-daemon, then retry.
                                 gx::setProperty(gx::sessionBus(), "org.gnome.SettingsDaemon.Rfkill", "/org/gnome/SettingsDaemon/Rfkill",
                                                 "org.gnome.SettingsDaemon.Rfkill", "BluetoothAirplaneMode", g_variant_new_boolean(!on),

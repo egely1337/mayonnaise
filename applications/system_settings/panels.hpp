@@ -8,6 +8,7 @@
 #include <map>
 #include <span>
 #include <string>
+#include <vector>
 
 struct Context {
     mayo::App& app;
@@ -63,3 +64,26 @@ mayo::Element regionPanel(Context& ctx);
 mayo::Element dateTimePanel(Context& ctx);
 mayo::Element usersPanel(Context& ctx);
 mayo::Element aboutPanel(Context& ctx);
+
+// KDE Plasma versions of the panels (and sections) that are GNOME-specific; the GNOME builders call these when
+// desk::kde() is true. Everything else (NetworkManager, BlueZ, UPower, PipeWire, systemd, AccountsService)
+// is shared.
+namespace kde {
+mayo::Element appearancePanel(Context& ctx);
+mayo::Element multitaskingPanel(Context& ctx);
+mayo::Element notificationsPanel(Context& ctx);
+mayo::Element searchPanel(Context& ctx);
+mayo::Element mousePanel(Context& ctx);
+mayo::Element keyboardPanel(Context& ctx);
+mayo::Element accessibilityPanel(Context& ctx);
+mayo::Element privacyPanel(Context& ctx);
+mayo::Element removableMediaSection();
+/// Screen, suspend and button settings (PowerDevil).
+std::vector<mayo::Element> powerSections();
+/// Night Light (KWin's [NightColor]).
+mayo::Element nightLightSection();
+mayo::Element proxySection();
+mayo::Element soundsSection();
+/// "6.2.4", empty when Plasma isn't installed.
+std::string plasmaVersion();
+}  // namespace kde

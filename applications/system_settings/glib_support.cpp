@@ -5,6 +5,7 @@
 #include <mayonnaise/app.hpp>
 
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <deque>
@@ -289,12 +290,40 @@ Key::Key(const std::string& schema, std::string key, const std::string& path) : 
 }
 
 std::string Key::type() const {
+    if (m_backend) return m_backend->type;
     if (!m_settings) return {};
     SchemaKey k(m_settings, m_key);
     return k.key ? g_variant_type_peek_string(g_settings_schema_key_get_value_type(k.key)) : std::string();
 }
 
-Variant Key::value() const { return m_settings ? Variant(g_settings_get_value(m_settings, m_key.c_str())) : nullptr; }
+std::optional<std::string> Key::backendText() const {
+    return m_backend && m_backend->read ? m_backend->read() : std::nullopt;
+}
+
+Variant Key::value() const {
+    if (m_backend) {
+        const std::string text = backendText().value_or(m_backend->fallback);
+        const std::string& t = m_backend->type;
+        if (t == "b") {
+            const std::string l = [&] {
+                std::string s = text;
+                for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                return s;
+            }();
+            return hold(g_variant_new_boolean(l == "true" || l == "1" || l == "yes" || l == "on"));
+        }
+        if (t == "i") return hold(g_variant_new_int32(static_cast<gint32>(std::strtoll(text.c_str(), nullptr, 10))));
+        if (t == "d") return hold(g_variant_new_double(g_ascii_strtod(text.c_str(), nullptr)));
+        if (t == "as") {
+            const auto items = splitList(text);
+            std::vector<const char*> c;
+            for (const auto& i : items) c.push_back(i.c_str());
+            return hold(g_variant_new_strv(c.data(), static_cast<gssize>(c.size())));
+        }
+        return hold(g_variant_new_string(text.c_str()));
+    }
+    return m_settings ? Variant(g_settings_get_value(m_settings, m_key.c_str())) : nullptr;
+}
 
 bool Key::getBool(bool fallback) const {
     auto v = value();
@@ -352,7 +381,30 @@ std::string Key::getText() const {
 
 void Key::setValue(GVariant* v) const {
     Variant held = hold(v);
-    if (!m_settings || !held || g_readOnly) return;
+    if (!held || g_readOnly) return;
+    if (m_backend) {
+        if (!m_backend->write) return;
+        std::string text;
+        switch (g_variant_classify(held.get())) {
+            case G_VARIANT_CLASS_STRING: text = g_variant_get_string(held.get(), nullptr); break;
+            case G_VARIANT_CLASS_BOOLEAN: text = g_variant_get_boolean(held.get()) ? "true" : "false"; break;
+            case G_VARIANT_CLASS_DOUBLE: {
+                char buf[G_ASCII_DTOSTR_BUF_SIZE];
+                g_ascii_formatd(buf, sizeof buf, "%.6g", g_variant_get_double(held.get()));
+                text = buf;
+                break;
+            }
+            case G_VARIANT_CLASS_ARRAY: text = joinList(strv(held.get())); break;
+            case G_VARIANT_CLASS_INT32: text = std::to_string(g_variant_get_int32(held.get())); break;
+            case G_VARIANT_CLASS_UINT32: text = std::to_string(g_variant_get_uint32(held.get())); break;
+            case G_VARIANT_CLASS_INT64: text = std::to_string(g_variant_get_int64(held.get())); break;
+            case G_VARIANT_CLASS_UINT64: text = std::to_string(g_variant_get_uint64(held.get())); break;
+            default: return;
+        }
+        m_backend->write(text);
+        return;
+    }
+    if (!m_settings) return;
     g_settings_set_value(m_settings, m_key.c_str(), held.get());
 }
 
@@ -392,16 +444,23 @@ void Key::setText(const std::string& text) const {
 }
 
 void Key::reset() const {
-    if (m_settings && !g_readOnly) g_settings_reset(m_settings, m_key.c_str());
+    if (g_readOnly) return;
+    if (m_backend) {
+        if (m_backend->write) m_backend->write(std::nullopt);
+        return;
+    }
+    if (m_settings) g_settings_reset(m_settings, m_key.c_str());
 }
 
 bool Key::isDefault() const {
+    if (m_backend) return !backendText();
     if (!m_settings) return true;
     Variant user(g_settings_get_user_value(m_settings, m_key.c_str()));
     return !user;
 }
 
 std::optional<std::pair<double, double>> Key::range() const {
+    if (m_backend) return m_backend->range;
     if (!m_settings) return std::nullopt;
     SchemaKey k(m_settings, m_key);
     if (!k.key) return std::nullopt;
@@ -440,7 +499,42 @@ std::vector<std::string> Key::choices() const {
 }
 
 void Key::watch(std::function<void()> fn) const {
+    if (m_backend) {
+        if (m_backend->watch) m_backend->watch(std::move(fn));
+        return;
+    }
     if (m_settings) watchers().emplace(WatchKey{m_settings, m_key}, std::move(fn));
+}
+
+std::vector<std::string> splitList(const std::string& text) {
+    std::vector<std::string> out;
+    if (text.empty()) return out;
+    std::string cur;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == ',') {
+            cur.push_back(',');
+            ++i;
+        } else if (text[i] == ',') {
+            out.push_back(std::move(cur));
+            cur.clear();
+        } else {
+            cur.push_back(text[i]);
+        }
+    }
+    out.push_back(std::move(cur));
+    return out;
+}
+
+std::string joinList(const std::vector<std::string>& items) {
+    std::string out;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i) out.push_back(',');
+        for (char c : items[i]) {
+            if (c == ',') out.push_back('\\');
+            out.push_back(c);
+        }
+    }
+    return out;
 }
 
 // D-Bus ----------------------------------------------------------------------------------------------

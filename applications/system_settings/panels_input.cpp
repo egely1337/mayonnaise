@@ -6,7 +6,9 @@
 #include <set>
 
 #include "glib_support.hpp"
+#include "kconfig.hpp"
 #include "panels.hpp"
+#include "panels_shared.hpp"
 #include "ui.hpp"
 
 using namespace mayo;
@@ -43,7 +45,13 @@ bool hasTouchpad() {
 
 // Mouse & Touchpad ------------------------------------------------------------------------------------------
 
-Element mousePanel(Context& /*ctx*/) {
+namespace shared {
+bool hasTouchpad() { return ::hasTouchpad(); }
+std::string ms(float v) { return ::ms(v); }
+}  // namespace shared
+
+Element mousePanel(Context& ctx) {
+    if (desk::kde()) return kde::mousePanel(ctx);
     std::vector<Element> sections{
         ui::section("General", {ui::pickerRow("Primary Button", gx::Key(kMouse, "left-handed"), {{"Left", "false"}, {"Right", "true"}},
                                               "Order of the physical buttons on mice and touchpads"),
@@ -538,6 +546,14 @@ private:
     ui::DynamicSection m_section{"Input Sources", "No input sources.", "The first source is the default. Switch with Super+Space."};
 };
 
+}  // namespace
+
+namespace shared {
+const std::map<std::string, std::string>& xkbLayoutNames() { return xkbLayouts().names; }
+}  // namespace shared
+
+namespace {
+
 struct KeyboardModel {
     InputSources sources;
     CustomShortcuts custom;
@@ -546,6 +562,7 @@ struct KeyboardModel {
 }  // namespace
 
 Element keyboardPanel(Context& ctx) {
+    if (desk::kde()) return kde::keyboardPanel(ctx);
     auto model = std::make_shared<KeyboardModel>();
     if (ctx.demo == "add") ctx.app.after(0.6, [m = model.get()] { m->sources.openAdd(); });
     if (ctx.demo == "shortcut")
@@ -601,7 +618,8 @@ FormRow largeTextRow() {
 
 }  // namespace
 
-Element accessibilityPanel(Context& /*ctx*/) {
+Element accessibilityPanel(Context& ctx) {
+    if (desk::kde()) return kde::accessibilityPanel(ctx);
     constexpr const char* kA11y = "org.gnome.desktop.a11y";
     constexpr const char* kA11yIface = "org.gnome.desktop.a11y.interface";
     constexpr const char* kApps = "org.gnome.desktop.a11y.applications";

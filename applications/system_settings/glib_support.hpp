@@ -57,15 +57,29 @@ void setReadOnly(bool readOnly);
 
 [[nodiscard]] bool hasSchema(const std::string& schema);
 
+/// Storage for a key that isn't GSettings: a KDE config file entry, a D-Bus property. Values travel as text
+/// (KConfig's own format: "true", "12", "1.5", lists joined with commas) and `type` says how to read them.
+struct KeyBackend {
+    std::string type;      ///< "b", "i", "d", "s" or "as"
+    std::string fallback;  ///< value text when nothing is stored
+    std::function<std::optional<std::string>()> read;               ///< nullopt: not set (the fallback applies)
+    std::function<void(const std::optional<std::string>&)> write;   ///< nullopt: reset to the default
+    std::function<void(std::function<void()>)> watch;               ///< optional
+    std::optional<std::pair<double, double>> range;
+};
+
 /// One key of a GSettings schema. A missing schema or key (another desktop, an older GNOME) makes the key
-/// unavailable instead of aborting the process, which is what g_settings_new does.
+/// unavailable instead of aborting the process, which is what g_settings_new does. Keys can also be backed by
+/// a KeyBackend (KDE), so the rows bound to keys work on either desktop.
 class Key {
 public:
     Key() = default;
     /// `path` is for relocatable schemas (per-application notification settings).
     Key(const std::string& schema, std::string key, const std::string& path = {});
+    explicit Key(std::shared_ptr<const KeyBackend> backend, std::string name = {})
+        : m_key(std::move(name)), m_backend(std::move(backend)) {}
 
-    [[nodiscard]] bool available() const { return m_settings != nullptr; }
+    [[nodiscard]] bool available() const { return m_settings != nullptr || m_backend != nullptr; }
     explicit operator bool() const { return available(); }
     [[nodiscard]] const std::string& name() const { return m_key; }
     [[nodiscard]] GSettings* settings() const { return m_settings; }
@@ -102,9 +116,16 @@ public:
     void watch(std::function<void()> fn) const;
 
 private:
+    [[nodiscard]] std::optional<std::string> backendText() const;
+
     GSettings* m_settings = nullptr;  // owned by a process-wide cache
     std::string m_key;
+    std::shared_ptr<const KeyBackend> m_backend;
 };
+
+/// KConfig list syntax: values joined with commas, literal commas escaped.
+[[nodiscard]] std::vector<std::string> splitList(const std::string& text);
+[[nodiscard]] std::string joinList(const std::vector<std::string>& items);
 
 // D-Bus ----------------------------------------------------------------------------------------------
 

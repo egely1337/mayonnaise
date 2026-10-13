@@ -16,6 +16,7 @@
 
 #include "glib_support.hpp"
 #include "json.hpp"
+#include "kconfig.hpp"
 #include "panels.hpp"
 #include "ui.hpp"
 
@@ -25,6 +26,7 @@ namespace fs = std::filesystem;
 // Privacy & Security --------------------------------------------------------------------------------------
 
 Element privacyPanel(Context& ctx) {
+    if (desk::kde()) return kde::privacyPanel(ctx);
     constexpr const char* kPrivacy = "org.gnome.desktop.privacy";
     constexpr const char* kScreensaver = "org.gnome.desktop.screensaver";
 
@@ -241,7 +243,9 @@ Element regionPanel(Context& ctx) {
         }, "Search Languages");
     });
 
-    gx::Key region("org.gnome.system.locale", "region");
+    // Plasma keeps the formats locale in plasma-localerc (applied at the next login, like GNOME).
+    gx::Key region = desk::kde() ? kcfg::key("plasma-localerc", "Formats", "LANG", "s", "", kcfg::Reload::None, true)
+                                 : gx::Key("org.gnome.system.locale", "region");
     auto formatsLabel = Label("").secondary();
     auto syncFormats = [region, names, formatsLabel]() mutable {
         const std::string r = region.getString();
@@ -349,6 +353,17 @@ public:
 
     std::vector<Element> sections() {
         constexpr const char* kIface = "org.gnome.desktop.interface";
+        if (desk::kde()) {
+            // Plasma's clock format lives in each clock widget's own settings; formats follow the region.
+            return {
+                ui::section({}, {FormRow(HStack({VStack({m_clock, m_date}).spacing(2)}))}),
+                ui::section("Date & Time",
+                            {FormRow("Automatic Date & Time", m_ntp, "Requires internet access"),
+                             FormRow("Time Zone", HStack({m_zoneLabel, m_zoneButton}).spacing(8).align(Alignment::Center)),
+                             m_manualRow},
+                            "The clock format follows Region & Language; right-click the panel clock for more options."),
+            };
+        }
         return {
             ui::section({}, {FormRow(HStack({VStack({m_clock, m_date}).spacing(2)}))}),
             ui::section("Date & Time",
@@ -737,7 +752,8 @@ Element aboutPanel(Context& ctx) {
     });
 
     std::string shell;
-    if (auto v = gx::property(gx::sessionBus(), "org.gnome.Shell", "/org/gnome/Shell", "org.gnome.Shell", "ShellVersion")) shell = gx::str(v.get());
+    if (desk::kde()) shell = kde::plasmaVersion();
+    else if (auto v = gx::property(gx::sessionBus(), "org.gnome.Shell", "/org/gnome/Shell", "org.gnome.Shell", "ShellVersion")) shell = gx::str(v.get());
     struct utsname un {};
     uname(&un);
     const char* session = std::getenv("XDG_SESSION_TYPE");
@@ -751,7 +767,7 @@ Element aboutPanel(Context& ctx) {
         {"Graphics", graphicsNames()}, {"Disk Capacity", diskCapacity()}};
     std::vector<std::pair<std::string, std::string>> software{
         {"OS Name", osName}, {"OS Type", sizeof(void*) == 8 ? "64-bit" : "32-bit"},
-        {"GNOME Version", shell.empty() ? "Not running" : shell}, {"Windowing System", windowing},
+        {desk::kde() ? "KDE Plasma Version" : "GNOME Version", shell.empty() ? "Not running" : shell}, {"Windowing System", windowing},
         {"Kernel Version", std::string(un.sysname) + " " + un.release}};
     if (const auto fw = gx::lookupString(host.get(), "FirmwareVersion"); !fw.empty()) software.emplace_back("Firmware Version", fw);
 

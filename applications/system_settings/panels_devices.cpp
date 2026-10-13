@@ -1,5 +1,6 @@
-// Displays (Mutter's DisplayConfig, logind brightness, Night Light), Sound (PipeWire / PulseAudio through
-// pactl) and Power (UPower, power-profiles-daemon, gnome-settings-daemon's power plugin).
+// Displays (Mutter's DisplayConfig or KDE's KScreen, logind brightness, Night Light), Sound (PipeWire /
+// PulseAudio through pactl) and Power (UPower, power-profiles-daemon, gnome-settings-daemon's power plugin or
+// PowerDevil).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -11,6 +12,7 @@
 
 #include "glib_support.hpp"
 #include "json.hpp"
+#include "kconfig.hpp"
 #include "panels.hpp"
 #include "ui.hpp"
 
@@ -148,6 +150,95 @@ std::optional<DisplayState> readDisplayState() {
     return s;
 }
 
+
+// KDE: KScreen, through kscreen-doctor (its JSON dump to read, output.<name>.<setting> arguments to apply).
+
+/// Whether kscreen-doctor knows output priorities (Plasma 5.27+) instead of a single primary flag.
+bool g_kscreenPriority = true;
+
+/// Monitor name from the EDID's display name descriptor, empty if there is none.
+std::string edidName(const std::string& connector) {
+    std::error_code ec;
+    for (const auto& card : fs::directory_iterator("/sys/class/drm", ec)) {
+        const std::string n = card.path().filename().string();
+        if (n.size() <= connector.size() || n.compare(n.size() - connector.size(), connector.size(), connector) != 0 ||
+            n[n.size() - connector.size() - 1] != '-')
+            continue;
+        std::ifstream in(card.path() / "edid", std::ios::binary);
+        std::string edid((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (size_t d = 54; d + 18 <= edid.size() && d < 126; d += 18) {
+            if (edid[d] != 0 || edid[d + 1] != 0 || static_cast<unsigned char>(edid[d + 3]) != 0xFC) continue;
+            std::string name = edid.substr(d + 5, 13);
+            name = name.substr(0, name.find('\n'));
+            return ui::trim(name);
+        }
+    }
+    return {};
+}
+
+std::optional<DisplayState> readKScreenState() {
+    if (!gx::haveProgram("kscreen-doctor")) return std::nullopt;
+    auto r = gx::runSync({"kscreen-doctor", "-j"});
+    if (!r.ok()) return std::nullopt;
+    const auto doc = json::Value::parse(r.out);
+    const auto& outputs = doc["outputs"];
+    if (outputs.type() != json::Value::Type::Array) return std::nullopt;
+    auto idText = [](const json::Value& v) {
+        if (v.type() == json::Value::Type::String) return v.string();
+        return std::to_string(static_cast<long long>(v.number(-1)));
+    };
+    DisplayState s;
+    s.layoutMode = 1;  // KScreen positions are logical
+    for (const auto& o : outputs.array()) {
+        if (!o["connected"].boolean(true)) continue;
+        DisplayMonitor mon;
+        mon.connector = o["name"].str();
+        const std::string c = mon.connector;
+        mon.builtin = o["type"].number() == 7 || c.rfind("eDP", 0) == 0 || c.rfind("LVDS", 0) == 0 || c.rfind("DSI", 0) == 0;
+        mon.name = edidName(c);
+        if (mon.name.empty()) mon.name = mon.builtin ? "Built-in Display" : c;
+        const std::string current = idText(o["currentModeId"]);
+        std::set<std::string> preferred;
+        if (o["preferredModes"].type() == json::Value::Type::Array) {
+            for (const auto& p : o["preferredModes"].array()) preferred.insert(idText(p));
+        }
+        const double scale = o["scale"].number(1);
+        std::vector<double> scales{1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3};
+        if (std::none_of(scales.begin(), scales.end(), [&](double x) { return std::abs(x - scale) < 0.01; })) {
+            scales.push_back(scale);
+            std::sort(scales.begin(), scales.end());
+        }
+        if (o["modes"].type() == json::Value::Type::Array) {
+            for (const auto& m : o["modes"].array()) {
+                DisplayMode mode;
+                mode.id = idText(m["id"]);
+                mode.width = static_cast<int>(m["size"]["width"].number());
+                mode.height = static_cast<int>(m["size"]["height"].number());
+                mode.refresh = m["refreshRate"].number();
+                mode.scales = scales;
+                // Plasma recommends 100% below ~1.5x the DPI of a typical desktop display; keep it simple.
+                mode.preferredScale = mon.builtin && mode.width >= 2560 ? 1.5 : 1.0;
+                mode.current = mode.id == current;
+                mode.preferred = preferred.contains(mode.id);
+                if (mode.width > 0) mon.modes.push_back(std::move(mode));
+            }
+        }
+        if (o["enabled"].boolean(true)) {
+            g_kscreenPriority = !o["priority"].isNull();
+            const bool primary = g_kscreenPriority ? o["priority"].number() == 1 : o["primary"].boolean();
+            // KScreen rotation flags: 1 none, 2 left (90° counter-clockwise), 4 inverted, 8 right.
+            const int rot = static_cast<int>(o["rotation"].number(1));
+            const unsigned transform = rot == 2 ? 1 : rot == 4 ? 2 : rot == 8 ? 3 : 0;
+            s.logical.push_back({static_cast<int>(o["pos"]["x"].number()), static_cast<int>(o["pos"]["y"].number()), scale,
+                                 transform, primary, {c}});
+        }
+        s.monitors.push_back(std::move(mon));
+    }
+    return s;
+}
+
+std::optional<DisplayState> readState() { return desk::kde() ? readKScreenState() : readDisplayState(); }
+
 const DisplayMonitor* monitorFor(const DisplayState& s, const std::string& connector) {
     for (const auto& m : s.monitors) {
         if (m.connector == connector) return &m;
@@ -186,22 +277,29 @@ class DisplaysPanel {
 
 public:
     DisplaysPanel(App& app, Element anchor) : m_app(app), m_anchor(std::move(anchor)) {
-        gx::subscribe(gx::sessionBus(), kMutterDisplay, kMutterDisplay, "MonitorsChanged", kMutterDisplayPath,
-                      [this](const std::string&, const std::string&, GVariant*) { reload(); });
+        if (desk::kde()) {
+            gx::subscribe(gx::sessionBus(), nullptr, "org.kde.kscreen.Backend", "configChanged", nullptr,
+                          [this](const std::string&, const std::string&, GVariant*) { m_kscreenChanged(); });
+        } else {
+            gx::subscribe(gx::sessionBus(), kMutterDisplay, kMutterDisplay, "MonitorsChanged", kMutterDisplayPath,
+                          [this](const std::string&, const std::string&, GVariant*) { reload(); });
+        }
     }
 
     std::vector<Element> sections() {
         std::vector<Element> out{m_body};
         if (auto b = brightnessSection()) out.push_back(b);
-        out.push_back(nightLightSection());
+        out.push_back(desk::kde() ? kde::nightLightSection() : nightLightSection());
         return out;
     }
 
     void reload() {
-        auto s = readDisplayState();
+        auto s = readState();
         if (!s) {
             m_body.clear();
-            m_body.add(ui::section({}, {FormRow(Label("Display settings need GNOME's compositor (Mutter).").secondary())}));
+            m_body.add(ui::section({}, {FormRow(Label(desk::kde() ? "Display settings need KScreen (kscreen-doctor)."
+                                                                  : "Display settings need GNOME's compositor (Mutter).")
+                                                    .secondary())}));
             return;
         }
         m_state = std::move(*s);
@@ -296,7 +394,31 @@ private:
         return out;
     }
 
+    /// KScreen applies and stores in one go, so "temporary" (method 1) and "persistent" (2) are the same call
+    /// and the keep prompt reverts by applying the previous layout again.
+    void applyKScreen(const std::vector<LogicalConfig>& config, unsigned method, std::function<void(const std::string&)> done) {
+        if (method == 2) return done({});
+        std::vector<std::string> argv{"kscreen-doctor"};
+        for (const auto& c : config) {
+            for (const auto& [conn, mode] : c.monitors) {
+                const std::string o = "output." + conn + ".";
+                char scale[32];
+                std::snprintf(scale, sizeof scale, "%g", c.scale);
+                static const char* kRotation[] = {"normal", "left", "inverted", "right"};
+                argv.push_back(o + "mode." + mode);
+                argv.push_back(o + "scale." + scale);
+                argv.push_back(o + "rotation." + kRotation[c.transform % 4]);
+                argv.push_back(o + "position." + std::to_string(c.x) + "," + std::to_string(c.y));
+                if (c.primary) argv.push_back(o + (g_kscreenPriority ? "priority.1" : "primary"));
+            }
+        }
+        gx::run(argv, [done](const gx::ProcessResult& r) {
+            done(r.ok() ? std::string() : ui::trim(r.err.empty() ? r.out : r.err));
+        });
+    }
+
     void applyConfig(const std::vector<LogicalConfig>& config, unsigned method, std::function<void(const std::string&)> done) {
+        if (desk::kde()) return applyKScreen(config, method, std::move(done));
         auto fresh = readDisplayState();
         if (!fresh) return done("The display configuration service went away.");
         GVariantBuilder lms;
@@ -375,7 +497,7 @@ private:
         st->decided = true;
         if (auto p = st->popover.lock()) p->dismiss();
         // Make what is on screen now the stored configuration (monitors.xml).
-        auto s = readDisplayState();
+        auto s = readState();
         if (!s) return;
         m_state = *s;
         std::map<std::string, MonitorChoice> now;
@@ -642,7 +764,7 @@ private:
         // Only offered when iio-sensor-proxy reports a light sensor, like GNOME Settings.
         auto sensor = gx::property(gx::systemBus(), "net.hadess.SensorProxy", "/net/hadess/SensorProxy", "net.hadess.SensorProxy",
                                    "HasAmbientLight");
-        if (ambient && sensor && g_variant_get_boolean(sensor.get()))
+        if (!desk::kde() && ambient && sensor && g_variant_get_boolean(sensor.get()))
             rows.push_back(ui::toggleRow("Automatic Brightness", ambient, "Adjusts to the light around you"));
         return ui::section("Brightness", rows);
     }
@@ -696,6 +818,7 @@ private:
     std::string m_backlight;
     long m_maxBrightness = 0;
     Slider m_brightness{0, 0, 1};
+    gx::Debounce m_kscreenChanged{0.3, [this] { reload(); }};
 };
 
 }  // namespace
@@ -857,6 +980,7 @@ public:
                                    m_balanceRow}),
             ui::section("Input", {FormRow("Input Device", m_inputPicker), m_inputPortRow, FormRow("Volume", m_inputVolume.element())}),
             m_apps.element(),
+            desk::kde() ? kde::soundsSection() :
             ui::section("Sounds", {ui::toggleRow("Alert Sounds", gx::Key("org.gnome.desktop.sound", "event-sounds")),
                                    ui::toggleRow("Input Feedback Sounds", gx::Key("org.gnome.desktop.sound", "input-feedback-sounds")),
                                    ui::toggleRow("Over-Amplification", m_overAmplify,
@@ -982,7 +1106,8 @@ private:
     std::vector<AudioDevice> m_inputs;
     std::vector<int> m_streamIds;
     std::vector<std::unique_ptr<VolumeControl>> m_streamControls;
-    gx::Key m_overAmplify{"org.gnome.desktop.sound", "allow-volume-above-100-percent"};
+    gx::Key m_overAmplify = desk::kde() ? kcfg::key("plasmaparc", "General", "RaiseMaximumVolume", "b", "false")
+                                        : gx::Key("org.gnome.desktop.sound", "allow-volume-above-100-percent");
     gx::Debounce m_changed{0.15, [this] { refresh(); }};
     Picker m_outputPicker{std::vector<std::string>{"—"}, 0};
     Picker m_inputPicker{std::vector<std::string>{"—"}, 0};
@@ -1091,6 +1216,10 @@ public:
         std::vector<Element> out{m_battery.element()};
         if (!m_profiles.empty()) out.push_back(m_modeSection);
         out.push_back(m_devices.element());
+        if (desk::kde()) {
+            for (auto& sec : kde::powerSections()) out.push_back(sec);
+            return out;
+        }
         out.push_back(ui::section("Power Saving",
                                   {ui::toggleRow("Dim Screen", gx::Key(kPowerPlugin, "idle-dim"), "Reduces brightness after a short time of inactivity"),
                                    ui::pickerRow("Screen Blank", gx::Key("org.gnome.desktop.session", "idle-delay"),

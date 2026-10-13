@@ -18,7 +18,8 @@ pkgname=(mayonnaise-git
          mayo-photos-git
          mayo-video-player-git
          mayo-system-settings-git
-         mayo-calculator-git)
+         mayo-calculator-git
+         mayo-music-git)
 pkgver=0.1.0.r29.5489758
 pkgrel=1
 pkgdesc='macOS-style (Liquid Glass) C++20 UI library on Vulkan or OpenGL, and apps built with it'
@@ -80,7 +81,7 @@ package_mayonnaise-git() {
 package_mayo-apps-git() {
   pkgdesc='All Mayonnaise applications'
   depends=(mayo-finder-git mayo-terminal-git mayo-task-manager-git mayo-photos-git mayo-video-player-git
-           mayo-system-settings-git mayo-calculator-git)
+           mayo-system-settings-git mayo-calculator-git mayo-music-git)
 }
 
 package_mayo-finder-git() {
@@ -121,10 +122,14 @@ package_mayo-video-player-git() {
 }
 
 package_mayo-system-settings-git() {
-  pkgdesc='System Settings-style control centre for GNOME (Mayonnaise)'
+  pkgdesc='System Settings-style control centre for GNOME and KDE Plasma (Mayonnaise)'
   depends=("${_appdeps[@]}" glib2 gsettings-desktop-schemas)
   optdepends=("$_vulkan" 'gnome-shell: Displays, Night Light and most desktop panels'
               'gnome-settings-daemon: power, Night Light and media key settings'
+              'kscreen: Displays panel on KDE Plasma (kscreen-doctor)'
+              'kwin: pointer devices, virtual desktops and Night Light on KDE Plasma'
+              'powerdevil: power settings on KDE Plasma'
+              'plasma-workspace: colour schemes, wallpapers and cursors on KDE Plasma'
               'networkmanager: Wi-Fi and Network panels'
               'bluez: Bluetooth panel'
               'libpulse: Sound panel (pactl; works with PipeWire)'
@@ -144,4 +149,11 @@ package_mayo-calculator-git() {
   depends=("${_appdeps[@]}")
   optdepends=("$_vulkan")
   _install_component calculator
+}
+
+package_mayo-music-git() {
+  pkgdesc='Music-style player with a library of albums, artists and songs (Mayonnaise)'
+  depends=("${_appdeps[@]}" ffmpeg glib2)
+  optdepends=("$_vulkan" 'xdg-utils: "Show in Files"' "$_dialogs")
+  _install_component music
 }

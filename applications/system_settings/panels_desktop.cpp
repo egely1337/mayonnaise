@@ -10,7 +10,9 @@
 #include <sstream>
 
 #include "glib_support.hpp"
+#include "kconfig.hpp"
 #include "panels.hpp"
+#include "panels_shared.hpp"
 #include "ui.hpp"
 
 using namespace mayo;
@@ -459,7 +461,19 @@ Element themesSection() {
 
 }  // namespace
 
+namespace shared {
+void stylePreview(Painter& p, const Rect& r, bool dark, Color accent) { drawStylePreview(p, r, dark, accent); }
+std::shared_ptr<ImageData> thumbnail(const std::string& path) { return makeThumbnail(path); }
+void cover(Painter& p, const Rect& r, const ImageData& img, float radius) { drawCover(p, r, img, radius); }
+std::vector<std::string> fontFamilies() { return ::fontFamilies(); }
+std::vector<ui::Option> themeDirs(const char* sub, const std::function<bool(const fs::path&)>& accept) { return themes(sub, accept); }
+std::vector<std::string> dataDirs() { return ::dataDirs(); }
+std::string fileUri(const std::string& path) { return ::fileUri(path); }
+bool isImage(const std::string& path) { return ::isImage(path); }
+}  // namespace shared
+
 Element appearancePanel(Context& ctx) {
+    if (desk::kde()) return kde::appearancePanel(ctx);
     if (ctx.demo == "fonts") {
         ctx.app.after(0.6, [anchor = ctx.anchor] {
             std::vector<ui::Option> items;
@@ -476,7 +490,8 @@ Element appearancePanel(Context& ctx) {
 
 // Multitasking ---------------------------------------------------------------------------------------------
 
-Element multitaskingPanel(Context& /*ctx*/) {
+Element multitaskingPanel(Context& ctx) {
+    if (desk::kde()) return kde::multitaskingPanel(ctx);
     gx::Key dynamic(kMutter, "dynamic-workspaces");
     gx::Key count(kWm, "num-workspaces");
     std::vector<std::string> numbers;
@@ -537,7 +552,8 @@ std::string appPath(const std::string& child) { return "/org/gnome/desktop/notif
 
 }  // namespace
 
-Element notificationsPanel(Context& /*ctx*/) {
+Element notificationsPanel(Context& ctx) {
+    if (desk::kde()) return kde::notificationsPanel(ctx);
     gx::Key children(kNotifications, "application-children");
     auto apps = std::make_shared<ui::DynamicSection>("App Notifications", "No apps have sent notifications yet.");
     auto rebuild = [children, apps] {
@@ -588,6 +604,7 @@ Element notificationsPanel(Context& /*ctx*/) {
 // Search -----------------------------------------------------------------------------------------------------
 
 Element searchPanel(Context& ctx) {
+    if (desk::kde()) return kde::searchPanel(ctx);
     constexpr const char* kProviders = "org.gnome.desktop.search-providers";
     gx::Key disableExternal(kProviders, "disable-external");
     gx::Key disabled(kProviders, "disabled");
@@ -796,9 +813,10 @@ Element appsPanel(Context& ctx) {
 
     return ui::page({
         card->element(),
-        ui::section("Removable Media",
-                    {ui::toggleRow("Automatically Open Media", gx::Key("org.gnome.desktop.media-handling", "autorun-never"),
-                                   "Ask what to do when a disc or camera is connected", true),
-                     ui::toggleRow("Mount Drives Automatically", gx::Key("org.gnome.desktop.media-handling", "automount"))}),
+        desk::kde() ? kde::removableMediaSection()
+                    : ui::section("Removable Media",
+                                  {ui::toggleRow("Automatically Open Media", gx::Key("org.gnome.desktop.media-handling", "autorun-never"),
+                                                 "Ask what to do when a disc or camera is connected", true),
+                                   ui::toggleRow("Mount Drives Automatically", gx::Key("org.gnome.desktop.media-handling", "automount"))}),
     });
 }

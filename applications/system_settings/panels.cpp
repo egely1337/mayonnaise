@@ -1,5 +1,9 @@
 #include "panels.hpp"
 
+#include <vector>
+
+#include "kconfig.hpp"
+
 using namespace mayo;
 
 namespace {
@@ -47,10 +51,21 @@ const PanelInfo kPanels[] = {
 
 }  // namespace
 
-std::span<const PanelInfo> panels() { return kPanels; }
+std::span<const PanelInfo> panels() {
+    // Wellbeing (screen time limits, break reminders) only exists in GNOME.
+    static const std::vector<PanelInfo> list = [] {
+        std::vector<PanelInfo> out;
+        for (const auto& p : kPanels) {
+            if (desk::kde() && std::string(p.id) == "wellbeing") continue;
+            out.push_back(p);
+        }
+        return out;
+    }();
+    return list;
+}
 
 const PanelInfo* findPanel(const std::string& id) {
-    for (const auto& p : kPanels) {
+    for (const auto& p : panels()) {
         if (id == p.id) return &p;
     }
     return nullptr;

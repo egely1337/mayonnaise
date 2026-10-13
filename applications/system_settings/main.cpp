@@ -1,10 +1,11 @@
-// Settings — a System Settings-style control centre for GNOME (and other GNU/Linux desktops where the
-// services exist) built on Mayonnaise.
+// Settings — a System Settings-style control centre for GNOME and KDE Plasma (and other GNU/Linux desktops
+// where the services exist) built on Mayonnaise.
 //
 // Everything is live: panels read and write the same GSettings keys and D-Bus services as GNOME Settings
 // (NetworkManager, BlueZ, UPower, power-profiles-daemon, Mutter's DisplayConfig, AccountsService,
 // systemd's timedated / localed / hostnamed, PipeWire/PulseAudio via pactl), and follow changes made
-// elsewhere while open.
+// elsewhere while open. Under Plasma (XDG_CURRENT_DESKTOP=KDE, or SETTINGS_DESKTOP=kde) the desktop panels
+// use KConfig files, KWin, KScreen and PowerDevil instead (kconfig.hpp, panels_kde.cpp).
 //
 //     system_settings [panel]          e.g. `system_settings wifi`
 //     MAYO_DEMO=<panel>[:<action>] MAYO_SCREENSHOT=/tmp/s.png system_settings

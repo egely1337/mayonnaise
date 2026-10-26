@@ -512,11 +512,13 @@ bool translate(const SDL_Event& e, PlatformEvent& out) {
             out.position = toPoints(e.drop.windowID, e.drop.x, e.drop.y);
             out.text = e.drop.data ? e.drop.data : "";
             return true;
+#if SDL_VERSION_ATLEAST(3, 4, 0)
         case SDL_EVENT_PINCH_UPDATE:
             out.type = EventType::Pinch;
             out.window = e.pinch.windowID;
             out.scale = e.pinch.scale;
             return true;
+#endif
         case SDL_EVENT_TEXT_INPUT:
             out.type = EventType::TextInput;
             out.window = e.text.windowID;

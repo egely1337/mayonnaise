@@ -1,0 +1,43 @@
+# Experimental named actions (first iteration)
+
+This change introduces a small, **optional**, application-local `mayo::ActionRegistry`.
+It is a foundation for later application menus and external menu export. It does
+**not** implement an external/global menu, a D-Bus publisher, a desktop panel, or
+automatic switching of in-window menubars.
+
+Existing `MenuItem` and `Window::onKey` usages remain unchanged. The registry is
+header-only, requires no additional library, and runs on the application's UI
+thread. Application authors own the registry and the callbacks it contains.
+
+```cpp
+#include "mayonnaise/actions.hpp"
+#include "mayonnaise/widgets/action_menu.hpp"
+
+mayo::ActionRegistry actions;
+int copied = 0;
+mayo::ActionDefinition copy{"Copy", [&] { ++copied; },
+                            mayo::ActionShortcut{mayo::Key::C, mayo::Modifiers::Ctrl}};
+actions.add("edit.copy", std::move(copy));
+
+// Integrate alongside existing app shortcuts; widgets retain first chance at keys.
+window.onKey([&](const mayo::KeyEvent& key) {
+    return actions.dispatch(key);
+});
+
+// Menu items are snapshots; rebuild when dynamic state changes.
+auto copyMenuItem = mayo::menuItemForAction(actions, "edit.copy");
+```
+
+Shortcuts use `Key`/`Modifiers`, not a label string, and the label is generated
+from the same binding that dispatches keys. Only one action may own a given
+shortcut in a registry. Enabled/checked states and dynamic labels are evaluated
+when queried. `activate()` rechecks the enabled state before running a callback.
+
+Action callbacks must not outlive captured objects. The adapter's returned
+`MenuItem` references the registry; the registry must therefore outlive the menu.
+The registry is **not thread-safe** and should be used on the UI/event thread.
+
+Next intended step: an application-level hierarchical `MenuModel` referencing
+action IDs, then optional serialization and an external-menu protocol adapter.
+The desktop shell will decide when an external menu is actually presented;
+normal applications must retain in-window menus without a functioning host.

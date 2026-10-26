@@ -33,6 +33,24 @@ from the same binding that dispatches keys. Only one action may own a given
 shortcut in a registry. Enabled/checked states and dynamic labels are evaluated
 when queried. `activate()` rechecks the enabled state before running a callback.
 
+State queries own copies of the queried action definitions and callbacks before
+calling application code. `describe(id)` returns that registration's snapshot even
+if a state callback removes or replaces it. `describeAll()` freezes the complete
+ordered collection before its first callback: removed/replaced entries still use
+the original definitions, and newly added entries appear only in a later query.
+Dynamic title, enabled and checked callbacks run in that order for each snapshot.
+Values read through captures are evaluated when each callback runs; this is not
+an atomic snapshot of application state. Mutable state stored inside a copied
+callable is local to that copy; use captured application state for persistent state.
+
+State callbacks may add/remove actions without invalidating the query. Activation
+checks enabled state once using an owned definition, then verifies that the same
+registration still exists. Removal or replacement (even under the same ID) rejects
+the activation without executing either handler. Unrelated additions/removals do
+not revoke it. Once execution begins, the execute callback may unregister itself.
+Changes are not rolled back if a callback throws; exceptions propagate normally.
+Callbacks must not destroy or concurrently access the registry during an operation.
+
 Action callbacks must not outlive captured objects. The adapter's returned
 `MenuItem` references the registry; the registry must therefore outlive the menu.
 The registry is **not thread-safe** and should be used on the UI/event thread.

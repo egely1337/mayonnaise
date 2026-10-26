@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -101,7 +102,7 @@ public:
                 if (entry.definition.shortcut == definition.shortcut) return false;
             }
         }
-        m_actions.push_back({std::move(id), std::move(definition)});
+        m_actions.push_back({std::move(id), std::move(definition), std::make_shared<Registration>()});
         return true;
     }
 
@@ -115,24 +116,28 @@ public:
     [[nodiscard]] std::optional<ActionSnapshot> describe(std::string_view id) const {
         const auto it = find(id);
         if (it == m_actions.end()) return std::nullopt;
-        return snapshot(*it);
+        const auto action = *it;  // Own the definition before any user callback runs.
+        return snapshot(action);
     }
 
     [[nodiscard]] std::vector<ActionSnapshot> describeAll() const {
+        const auto actions = m_actions;  // Freeze all registrations, including later entries.
         std::vector<ActionSnapshot> result;
-        result.reserve(m_actions.size());
-        for (const auto& action : m_actions) result.push_back(snapshot(action));
+        result.reserve(actions.size());
+        for (const auto& action : actions) result.push_back(snapshot(action));
         return result;
     }
 
-    /// Recheck enabled state before executing. Copy callback so it can remove its own action safely.
+    /// Recheck enabled state and registration identity before executing.
+    /// Copied callbacks may safely remove their own action; removal during enabled rejects activation.
     bool activate(std::string_view id) const {
         const auto it = find(id);
         if (it == m_actions.end()) return false;
-        const auto enabled = it->definition.enabled;
-        const auto execute = it->definition.execute;
-        if (enabled && !enabled()) return false;
-        execute();
+        const auto action = *it;  // Also own the ID: dispatch may borrow it from the live entry.
+        if (action.definition.enabled && !action.definition.enabled()) return false;
+        const auto current = find(action.id);
+        if (current == m_actions.end() || current->registration != action.registration) return false;
+        action.definition.execute();
         return true;
     }
 
@@ -148,9 +153,11 @@ public:
     }
 
 private:
+    struct Registration {};  // Identity survives callback copies, never aliases a fresh add().
     struct Entry {
         std::string id;
         ActionDefinition definition;
+        std::shared_ptr<const Registration> registration;
     };
     std::vector<Entry> m_actions;
 
